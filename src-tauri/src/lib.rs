@@ -34,6 +34,7 @@ const REFRESH: Duration = Duration::from_millis(500);
 const RESCAN: Duration = Duration::from_secs(5);
 const RETRY: Duration = Duration::from_secs(3);
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(8);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 static RESET: AtomicBool = AtomicBool::new(false);
 static LOCKED: AtomicBool = AtomicBool::new(false);
@@ -185,8 +186,10 @@ fn update(app: AppHandle) {
 			Ok(updater) => updater.check().await.ok().flatten(),
 			Err(_) => None,
 		};
-		if let Some(update) = update {
+		if let Some(mut update) = update {
+			update.timeout = Some(DOWNLOAD_TIMEOUT);
 			let version = update.version.clone();
+			let _ = app.emit("update", UpdateState::Downloading { version: version.clone(), progress: None });
 			let mut downloaded = 0;
 			let mut reported = None;
 			let download = update.download(
