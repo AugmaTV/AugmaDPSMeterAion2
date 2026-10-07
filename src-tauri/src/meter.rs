@@ -466,7 +466,7 @@ impl Meter {
 				dtps: per_second(stats.taken, elapsed),
 				taken_hits: stats.taken_hits,
 				own: self.own == Some(*id),
-				member: self.own.is_none_or(|own| own == *id || encounter.members.contains(id)),
+				member: self.own == Some(*id) || encounter.members.contains(id),
 				skills: skills(&stats.skills),
 				heals: skills(&stats.heals),
 				sources: skills(&stats.sources),
@@ -497,7 +497,7 @@ impl Meter {
 	}
 
 	fn member(&self, entity: u64) -> bool {
-		self.own.is_none_or(|own| own == entity || self.party.contains(&entity))
+		self.own == Some(entity) || self.party.contains(&entity)
 	}
 
 	fn is_player(&self, entity: u64) -> bool {
@@ -767,13 +767,17 @@ mod tests {
 	}
 
 	#[test]
-	fn shows_everyone_until_self_is_known() {
+	fn shows_nobody_without_party_info() {
 		let mut meter = Meter::default();
 		meter.set_party_only(true);
-		meter.apply(0, Event::PartyMember { entity: 2 });
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(0, hit(900, 3, 11020000, 100));
-		assert_eq!(meter.snapshot(Status::Live).players.len(), 2);
+		assert!(meter.snapshot(Status::Live).players.is_empty());
+		meter.apply(1_000_000, Event::PartyMember { entity: 1 });
+		meter.apply(1_000_000, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, hit(900, 3, 11020000, 100));
+		let players: Vec<u64> = meter.snapshot(Status::Live).players.iter().map(|player| player.id).collect();
+		assert_eq!(players, vec![1]);
 	}
 
 	#[test]
