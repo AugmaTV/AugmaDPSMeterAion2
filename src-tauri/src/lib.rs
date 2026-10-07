@@ -38,6 +38,7 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 static RESET: AtomicBool = AtomicBool::new(false);
 static LOCKED: AtomicBool = AtomicBool::new(false);
+static PARTY_ONLY: AtomicBool = AtomicBool::new(true);
 static OPENING: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize, Clone)]
@@ -92,6 +93,16 @@ fn lock_overlay(app: AppHandle, locked: bool) {
 	set_locked(&app, locked);
 }
 
+#[command]
+fn party_only() -> bool {
+	PARTY_ONLY.load(Ordering::Relaxed)
+}
+
+#[command]
+fn set_party_only(enabled: bool) {
+	PARTY_ONLY.store(enabled, Ordering::Relaxed);
+}
+
 pub fn run() {
 	Builder::default()
 		.plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -111,7 +122,7 @@ pub fn run() {
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay])
+		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay, party_only, set_party_only])
 		.on_window_event(|window, event| {
 			if !matches!(event, WindowEvent::Destroyed) {
 				return;
@@ -168,6 +179,7 @@ fn capture(app: AppHandle) {
 		let mut scanned = Instant::now();
 		let mut emitted = Instant::now();
 		loop {
+			engine.set_party_only(PARTY_ONLY.load(Ordering::Relaxed));
 			if scanned.elapsed() >= RESCAN {
 				source.refresh(FILTER, &sender);
 				scanned = Instant::now();

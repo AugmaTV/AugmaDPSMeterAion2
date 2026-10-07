@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Lock, LockOpen, PictureInPicture2, RotateCcw } from "lucide-react";
+import { Lock, LockOpen, PictureInPicture2, RotateCcw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BossBar } from "@/components/boss-bar";
@@ -22,6 +22,7 @@ export default function App() {
 	const [selected, setSelected] = useState<number | null>(null);
 	const [mode, setMode] = useState<Mode>("damage");
 	const [overlay, setOverlay] = useState<OverlayState>({ open: false, locked: false });
+	const [partyOnly, setPartyOnly] = useState(true);
 
 	useEffect(() => {
 		const listeners = Promise.all([
@@ -32,6 +33,7 @@ export default function App() {
 			listen<OverlayState>("overlay", (event) => setOverlay(event.payload)),
 		]);
 		invoke<OverlayState>("overlay").then(setOverlay);
+		invoke<boolean>("party_only").then(setPartyOnly);
 		return () => {
 			listeners.then((unlisteners) => unlisteners.forEach((unlisten) => unlisten()));
 		};
@@ -49,6 +51,9 @@ export default function App() {
 				<span className="font-semibold">Augma DPS</span>
 				<span className="text-muted-foreground tabular-nums">{clock(snapshot?.duration ?? 0)}</span>
 				<span className="ml-auto font-semibold tabular-nums">{compact(totalRate)}/s</span>
+				<Button variant={partyOnly ? "secondary" : "ghost"} size="icon-sm" title={partyOnly ? "Afficher tous les joueurs" : "Afficher seulement moi et mon groupe"} onClick={() => invoke("set_party_only", { enabled: !partyOnly }).then(() => setPartyOnly(!partyOnly))}>
+					<Users />
+				</Button>
 				{overlay.open && (
 					<Button variant="ghost" size="icon-sm" title={overlay.locked ? "Déverrouiller les overlays (Ctrl+Shift+L)" : "Verrouiller les overlays (Ctrl+Shift+L)"} onClick={() => invoke("lock_overlay", { locked: !overlay.locked })}>
 						{overlay.locked ? <Lock /> : <LockOpen />}

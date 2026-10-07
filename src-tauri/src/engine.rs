@@ -39,6 +39,10 @@ impl Engine {
 		self.meter.reset();
 	}
 
+	pub fn set_party_only(&mut self, enabled: bool) {
+		self.meter.set_party_only(enabled);
+	}
+
 	pub fn snapshot(&self, micros: u64) -> Snapshot {
 		self.meter.snapshot(if self.stream.is_live(micros) { Status::Live } else { Status::Waiting })
 	}

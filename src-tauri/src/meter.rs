@@ -61,6 +61,8 @@ pub struct Player {
 	pub dtps: u64,
 	pub taken_hits: u64,
 	pub own: bool,
+	#[serde(skip)]
+	pub member: bool,
 	pub skills: Vec<Skill>,
 	pub heals: Vec<Skill>,
 	pub sources: Vec<Skill>,
@@ -83,6 +85,9 @@ pub struct Meter {
 	owners: HashMap<u64, u64>,
 	vitals: HashMap<u64, Vitals>,
 	own: Option<u64>,
+	party: HashSet<u64>,
+	roster: HashSet<u64>,
+	party_only: bool,
 	map: Option<u32>,
 	encounter: Option<Encounter>,
 }
@@ -106,6 +111,7 @@ struct Encounter {
 	ended: Option<u64>,
 	targets: HashMap<u64, u64>,
 	actors: HashMap<u64, Stats>,
+	members: HashSet<u64>,
 	frozen: Option<(Vec<Player>, Option<Boss>)>,
 }
 
@@ -152,6 +158,16 @@ impl Meter {
 				}
 				self.map = Some(map);
 			}
+			Event::PartyMember { entity } => self.join(entity),
+			Event::PartyRoster { entities } => {
+				for left in self.roster.difference(&entities) {
+					self.party.remove(left);
+				}
+				for entity in &entities {
+					self.join(*entity);
+				}
+				self.roster = entities;
+			}
 		}
 	}
 
@@ -167,20 +183,29 @@ impl Meter {
 		self.owners.clear();
 		self.vitals.clear();
 		self.own = None;
+		self.party.clear();
+		self.roster.clear();
 	}
 
 	pub fn reset(&mut self) {
 		self.encounter = None;
 	}
 
+	pub fn set_party_only(&mut self, enabled: bool) {
+		self.party_only = enabled;
+	}
+
 	pub fn snapshot(&self, status: Status) -> Snapshot {
 		let Some(encounter) = &self.encounter else {
 			return Snapshot { status, duration: 0, total: 0, total_healing: 0, total_taken: 0, boss: None, players: Vec::new() };
 		};
-		let (players, boss) = match &encounter.frozen {
+		let (mut players, boss) = match &encounter.frozen {
 			Some((players, boss)) => (players.clone(), boss.clone()),
 			None => (self.players(encounter), self.boss(encounter)),
 		};
+		if self.party_only {
+			players.retain(|player| player.member);
+		}
 		Snapshot {
 			status,
 			duration: (encounter.last - encounter.start) / 1000,
@@ -209,7 +234,7 @@ impl Meter {
 		if self.owner(hit.target) == actor {
 			return;
 		}
-		let starts = self.is_player(actor);
+		let starts = self.is_player(actor) && (!self.party_only || self.member(actor));
 		let dead = self.vitals.get(&hit.target).is_some_and(|vitals| vitals.dead);
 		if !self.active(micros) {
 			let late = dead && self.encounter.as_ref().is_some_and(|encounter| encounter.ended.is_some_and(|ended| micros.saturating_sub(ended) < GRACE_MICROS) && encounter.targets.contains_key(&hit.target));
@@ -228,7 +253,7 @@ impl Meter {
 				vitals.before += hit.damage;
 			}
 		}
-		let encounter = self.encounter.get_or_insert_with(|| Encounter { start: micros, last: micros, ended: None, targets: HashMap::new(), actors: HashMap::new(), frozen: None });
+		let encounter = self.encounter.get_or_insert_with(|| Encounter { start: micros, last: micros, ended: None, targets: HashMap::new(), actors: HashMap::new(), members: self.party.clone(), frozen: None });
 		if starts {
 			encounter.last = encounter.last.max(micros);
 			*encounter.targets.entry(hit.target).or_default() += hit.damage;
@@ -341,6 +366,13 @@ impl Meter {
 		}
 	}
 
+	fn join(&mut self, entity: u64) {
+		self.party.insert(entity);
+		if let Some(encounter) = &mut self.encounter {
+			encounter.members.insert(entity);
+		}
+	}
+
 	fn finish(&mut self, micros: u64, entity: u64) {
 		let boss = self.vitals.get(&entity).is_some_and(|vitals| vitals.limit() >= BOSS_HP);
 		let tracked = self.encounter.as_ref().is_some_and(|encounter| encounter.targets.contains_key(&entity));
@@ -385,6 +417,7 @@ impl Meter {
 				dtps: (stats.taken as f64 / seconds) as u64,
 				taken_hits: stats.taken_hits,
 				own: self.own == Some(*id),
+				member: self.own.is_none_or(|own| own == *id || encounter.members.contains(id)),
 				skills: skills(&stats.skills),
 				heals: skills(&stats.heals),
 				sources: skills(&stats.sources),
@@ -412,6 +445,10 @@ impl Meter {
 
 	fn owner(&self, entity: u64) -> u64 {
 		self.owners.get(&entity).copied().unwrap_or(entity)
+	}
+
+	fn member(&self, entity: u64) -> bool {
+		self.own.is_none_or(|own| own == entity || self.party.contains(&entity))
 	}
 
 	fn is_player(&self, entity: u64) -> bool {
@@ -546,6 +583,69 @@ mod tests {
 		let player = snapshot.players.iter().find(|player| player.id == 1).unwrap();
 		assert_eq!((snapshot.total_taken, player.taken, player.taken_hits), (450, 450, 1));
 		assert_eq!(player.sources[0].id, 2301014);
+	}
+
+	#[test]
+	fn shows_only_self_and_party() {
+		let mut meter = Meter::default();
+		meter.set_party_only(true);
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::PartyMember { entity: 2 });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(0, hit(900, 2, 12020000, 50));
+		meter.apply(0, hit(900, 3, 13020000, 999));
+		assert_eq!(meter.snapshot(Status::Live).total, 150);
+		meter.set_party_only(false);
+		assert_eq!(meter.snapshot(Status::Live).total, 1149);
+	}
+
+	#[test]
+	fn ignores_strangers_for_encounter_timing() {
+		let mut meter = Meter::default();
+		meter.set_party_only(true);
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(5_000_000, hit(900, 3, 13020000, 999));
+		meter.apply(IDLE_MICROS * 2, hit(901, 3, 13020000, 999));
+		let snapshot = meter.snapshot(Status::Live);
+		assert_eq!((snapshot.duration, snapshot.total), (0, 100));
+	}
+
+	#[test]
+	fn keeps_members_after_party_disbands() {
+		let mut meter = Meter::default();
+		meter.set_party_only(true);
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::PartyRoster { entities: HashSet::from([1, 2]) });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(0, hit(900, 2, 12020000, 50));
+		meter.apply(1_000_000, Event::PartyRoster { entities: HashSet::from([1]) });
+		assert_eq!(meter.snapshot(Status::Live).total, 150);
+	}
+
+	#[test]
+	fn removes_members_leaving_the_roster() {
+		let mut meter = Meter::default();
+		meter.set_party_only(true);
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::PartyMember { entity: 4 });
+		meter.apply(0, Event::PartyRoster { entities: HashSet::from([1, 2, 3]) });
+		meter.apply(0, Event::PartyRoster { entities: HashSet::from([1, 3]) });
+		for actor in 1..=5 {
+			meter.apply(0, hit(900, actor, 11020000, 10));
+		}
+		let players: HashSet<u64> = meter.snapshot(Status::Live).players.iter().map(|player| player.id).collect();
+		assert_eq!(players, HashSet::from([1, 3, 4]));
+	}
+
+	#[test]
+	fn shows_everyone_until_self_is_known() {
+		let mut meter = Meter::default();
+		meter.set_party_only(true);
+		meter.apply(0, Event::PartyMember { entity: 2 });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(0, hit(900, 3, 11020000, 100));
+		assert_eq!(meter.snapshot(Status::Live).players.len(), 2);
 	}
 
 	#[test]

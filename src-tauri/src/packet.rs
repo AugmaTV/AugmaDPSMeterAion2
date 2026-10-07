@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ops::RangeInclusive;
 
 use crate::reader::Reader;
@@ -11,6 +12,8 @@ const DESPAWN: [u8; 2] = [0x42, 0x36];
 const HEALTH: [u8; 2] = [0x00, 0x8D];
 const COMBAT: [u8; 2] = [0x21, 0x8D];
 const MAP_CHANGE: [u8; 2] = [0x21, 0x36];
+const PARTY_ROSTER: [u8; 2] = [0x00, 0x92];
+const PARTY_MEMBERS: [[u8; 2]; 3] = [[0x0E, 0x92], [0x1A, 0x92], [0x1B, 0x92]];
 const PARENT_MARKER: [u8; 8] = [0xFF; 8];
 
 const CRITICAL: u64 = 3;
@@ -36,6 +39,10 @@ const KIND_OTHER: u8 = 0x30;
 const KIND_EXTRA: u8 = 0x40;
 const HOT_TICK: u8 = 0x0B;
 const HOT_LAST_TICK: u8 = 0x0A;
+const UUID_MARKER: u8 = 0x24;
+const UUID_LENGTH: usize = 36;
+const UUID_DASHES: [usize; 4] = [8, 13, 18, 23];
+const ROSTER_ENTITY_OFFSET: usize = 8;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
@@ -47,6 +54,8 @@ pub enum Event {
 	Despawn { entity: u64, dead: bool },
 	Combat { entity: u64, active: bool },
 	MapChange { map: u32, revive: bool },
+	PartyMember { entity: u64 },
+	PartyRoster { entities: HashSet<u64> },
 }
 
 #[derive(Debug, PartialEq)]
@@ -87,6 +96,8 @@ pub fn decode(body: &[u8]) -> Option<Event> {
 		HEALTH => health(&mut reader),
 		COMBAT => combat(&mut reader),
 		MAP_CHANGE => map_change(&mut reader),
+		PARTY_ROSTER => party_roster(reader.rest()),
+		opcode if PARTY_MEMBERS.contains(&opcode) => Some(Event::PartyMember { entity: reader.varint()? }),
 		_ => None,
 	}
 }
@@ -265,6 +276,20 @@ fn map_change(reader: &mut Reader) -> Option<Event> {
 	Some(Event::MapChange { map, revive: reader.u8()? == REVIVE_REASON })
 }
 
+fn party_roster(data: &[u8]) -> Option<Event> {
+	let entities: HashSet<u64> = (ROSTER_ENTITY_OFFSET..data.len())
+		.filter(|anchor| data[*anchor] == UUID_MARKER && data.get(anchor + 1..anchor + 1 + UUID_LENGTH).is_some_and(uuid))
+		.filter_map(|anchor| Reader::new(&data[anchor - ROSTER_ENTITY_OFFSET..]).u32())
+		.filter(|entity| *entity != 0)
+		.map(u64::from)
+		.collect();
+	(!entities.is_empty()).then_some(Event::PartyRoster { entities })
+}
+
+fn uuid(text: &[u8]) -> bool {
+	text.iter().enumerate().all(|(index, byte)| if UUID_DASHES.contains(&index) { *byte == b'-' } else { byte.is_ascii_hexdigit() })
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -275,6 +300,15 @@ mod tests {
 
 	fn hit(target: u64, actor: u64, skill: u32, damage: u64, drain: u64) -> Option<Event> {
 		Some(Event::Hit(Hit { target, actor, skill, damage, critical: false, dot: false, drain }))
+	}
+
+	fn roster_row(entity: u32) -> Vec<u8> {
+		let mut row = vec![0x03, 0x04];
+		row.extend(entity.to_le_bytes());
+		row.extend([0xEF, 0x03, 0xA9, 0x0F, UUID_MARKER]);
+		row.extend(b"00000000-0000-4000-8000-000000000001");
+		row.extend([0x02, 0x65, 0x01, 0x00]);
+		row
 	}
 
 	#[test]
@@ -367,5 +401,21 @@ mod tests {
 		assert_eq!(decode(&bytes("00 8d dd 10 03 01 01 26 0f 00 00 01 00 7d 61 00 00 00 00 00 00")), Some(Event::Health { entity: 2141, hp: 24957 }));
 		assert_eq!(decode(&bytes("00 8d b7 32 01 01 03 28 17 02 00")), None);
 		assert_eq!(decode(&bytes("00 8d f9 22 02 02 00 b8 5f 00 00 00 00 00 00 07 c8 68 00 00 00 00 00 00")), Some(Event::Health { entity: 4473, hp: 24504 }));
+	}
+
+	#[test]
+	fn decodes_party_members() {
+		assert_eq!(decode(&bytes("0e 92 8b 2b 00")), Some(Event::PartyMember { entity: 5515 }));
+		assert_eq!(decode(&bytes("1b 92 e6 7d 00 bf 9c 01 a5 15 00 00 bd 17 00 00 00 00 00 00 00 00 00 00 a6 73 00 00 f0 49 02 00 00")), Some(Event::PartyMember { entity: 16102 }));
+	}
+
+	#[test]
+	fn decodes_party_roster() {
+		let mut body = bytes("00 92 00 4e 8f 06 00 cb 34 c5 16 00 00 00 00 00 05");
+		body.extend(roster_row(5248));
+		body.extend(roster_row(0));
+		body.extend(roster_row(2204));
+		assert_eq!(decode(&body), Some(Event::PartyRoster { entities: HashSet::from([5248, 2204]) }));
+		assert_eq!(decode(&bytes("00 92 00 4e 8f 06 00 cb 34 c5 16 00 00 00 00 00 05")), None);
 	}
 }
