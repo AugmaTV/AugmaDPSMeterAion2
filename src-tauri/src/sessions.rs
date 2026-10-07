@@ -25,6 +25,8 @@ pub struct Summary {
 	pub duration: u64,
 	pub fights: usize,
 	pub dps: u64,
+	#[serde(default)]
+	pub locked: bool,
 }
 
 #[derive(Serialize)]
@@ -54,19 +56,19 @@ pub fn save(directory: &Path, fights: &[Fight]) -> Result<()> {
 	fs::write(file(directory, first.start), serde_json::to_vec(fights)?)?;
 	let snapshot = summarize(Status::Waiting, &fights.iter().collect::<Vec<_>>(), true);
 	let mut index = index(directory);
-	let name = index.iter().find(|summary| summary.id == first.start).and_then(|summary| summary.name.clone());
-	index.retain(|summary| summary.id != first.start);
+	let previous = index.iter().position(|summary| summary.id == first.start).map(|position| index.remove(position));
 	index.push(Summary {
 		id: first.start,
-		name,
+		name: previous.as_ref().and_then(|summary| summary.name.clone()),
 		boss: fights.iter().filter_map(|fight| fight.boss.as_ref()).max_by_key(|boss| boss.max).and_then(|boss| boss.npc),
 		start: first.start / 1000,
 		duration: snapshot.duration,
 		fights: fights.len(),
 		dps: snapshot.players.iter().map(|player| player.dps).sum(),
+		locked: previous.is_some_and(|summary| summary.locked),
 	});
 	index.sort_by_key(|summary| Reverse(summary.id));
-	let expired: Vec<u64> = index.iter().skip(KEPT).filter(|summary| summary.name.is_none()).map(|summary| summary.id).collect();
+	let expired: Vec<u64> = index.iter().skip(KEPT).filter(|summary| !summary.locked).map(|summary| summary.id).collect();
 	for id in &expired {
 		let _ = fs::remove_file(file(directory, *id));
 	}
@@ -92,12 +94,11 @@ pub fn view(directory: &Path, id: u64, fight: Option<usize>, party_only: bool) -
 }
 
 pub fn rename(directory: &Path, id: u64, name: Option<String>) -> Result<()> {
-	let _lock = LOCK.lock();
-	let mut index = index(directory);
-	if let Some(summary) = index.iter_mut().find(|summary| summary.id == id) {
-		summary.name = name;
-	}
-	write(directory, &index)
+	update(directory, id, |summary| summary.name = name)
+}
+
+pub fn lock(directory: &Path, id: u64, locked: bool) -> Result<()> {
+	update(directory, id, |summary| summary.locked = locked)
 }
 
 pub fn delete(directory: &Path, id: u64) -> Result<()> {
@@ -105,6 +106,15 @@ pub fn delete(directory: &Path, id: u64) -> Result<()> {
 	let mut index = index(directory);
 	index.retain(|summary| summary.id != id);
 	let _ = fs::remove_file(file(directory, id));
+	write(directory, &index)
+}
+
+fn update(directory: &Path, id: u64, change: impl FnOnce(&mut Summary)) -> Result<()> {
+	let _lock = LOCK.lock();
+	let mut index = index(directory);
+	if let Some(summary) = index.iter_mut().find(|summary| summary.id == id) {
+		change(summary);
+	}
 	write(directory, &index)
 }
 
@@ -147,9 +157,10 @@ mod tests {
 		let directory = temporary("manage");
 		save(&directory, &fights(1_000_000)).unwrap();
 		rename(&directory, 1_000_000, Some(String::from("Run"))).unwrap();
+		lock(&directory, 1_000_000, true).unwrap();
 		save(&directory, &fights(1_000_000)).unwrap();
 		let sessions = list(&directory);
-		assert_eq!((sessions.len(), sessions[0].name.as_deref(), sessions[0].duration, sessions[0].dps), (1, Some("Run"), 2000, 1000));
+		assert_eq!((sessions.len(), sessions[0].name.as_deref(), sessions[0].locked, sessions[0].duration, sessions[0].dps), (1, Some("Run"), true, 2000, 1000));
 		assert_eq!(view(&directory, 1_000_000, None, false).unwrap().snapshot.total, 2000);
 		delete(&directory, 1_000_000).unwrap();
 		assert!(list(&directory).is_empty() && view(&directory, 1_000_000, None, false).is_none());
@@ -157,17 +168,28 @@ mod tests {
 	}
 
 	#[test]
-	fn keeps_recent_and_renamed_sessions() {
+	fn keeps_recent_and_locked_sessions() {
 		let directory = temporary("prune");
 		save(&directory, &fights(1_000_000)).unwrap();
-		rename(&directory, 1_000_000, Some(String::from("Gardée"))).unwrap();
-		for index in 2..=(KEPT as u64 + 2) {
+		lock(&directory, 1_000_000, true).unwrap();
+		save(&directory, &fights(2_000_000)).unwrap();
+		rename(&directory, 2_000_000, Some(String::from("Renommée"))).unwrap();
+		for index in 3..=(KEPT as u64 + 2) {
 			save(&directory, &fights(index * 1_000_000)).unwrap();
 		}
 		let sessions = list(&directory);
 		assert_eq!(sessions.len(), KEPT + 1);
 		assert!(sessions.iter().any(|summary| summary.id == 1_000_000) && !sessions.iter().any(|summary| summary.id == 2_000_000));
 		assert!(!file(&directory, 2_000_000).exists());
+		let _ = fs::remove_dir_all(&directory);
+	}
+
+	#[test]
+	fn reads_index_without_lock() {
+		let directory = temporary("legacy");
+		fs::create_dir_all(&directory).unwrap();
+		fs::write(directory.join(INDEX), r#"[{"id":1,"name":null,"boss":null,"start":0,"duration":0,"fights":1,"dps":0}]"#).unwrap();
+		assert!(list(&directory).iter().all(|summary| !summary.locked) && list(&directory).len() == 1);
 		let _ = fs::remove_dir_all(&directory);
 	}
 }

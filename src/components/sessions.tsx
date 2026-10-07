@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronLeft, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, Lock, LockOpen, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BossBar } from "@/components/boss-bar";
 import { Board } from "@/components/board";
@@ -74,6 +74,9 @@ export function Sessions({ onBack }: { onBack: () => void }) {
 							</button>
 						)}
 						<span className="w-16 text-right font-semibold tabular-nums">{compact(session.dps)}/s</span>
+						<Button variant={session.locked ? "secondary" : "ghost"} size="icon-sm" title={session.locked ? "Session protégée : cliquer pour la déverrouiller" : "Protéger de la suppression automatique"} onClick={() => invoke("lock_session", { id: session.id, locked: !session.locked }).then(refresh)}>
+							{session.locked ? <Lock /> : <LockOpen />}
+						</Button>
 						<Button variant="ghost" size="icon-sm" title="Renommer" onClick={() => setRenaming({ id: session.id, name: session.name ?? "" })}>
 							<Pencil />
 						</Button>

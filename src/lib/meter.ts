@@ -59,6 +59,7 @@ export type SessionSummary = {
 	duration: number;
 	fights: number;
 	dps: number;
+	locked: boolean;
 };
 
 export type SessionView = {

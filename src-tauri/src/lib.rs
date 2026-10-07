@@ -133,6 +133,11 @@ fn rename_session(app: AppHandle, id: u64, name: String) -> Result<()> {
 }
 
 #[command]
+fn lock_session(app: AppHandle, id: u64, locked: bool) -> Result<()> {
+	Ok(sessions::lock(&sessions::directory(&app)?, id, locked)?)
+}
+
+#[command]
 fn delete_session(app: AppHandle, id: u64) -> Result<()> {
 	Ok(sessions::delete(&sessions::directory(&app)?, id)?)
 }
@@ -156,7 +161,7 @@ pub fn run() {
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, delete_session])
+		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, lock_session, delete_session])
 		.on_window_event(|window, event| {
 			if !matches!(event, WindowEvent::Destroyed) {
 				return;
