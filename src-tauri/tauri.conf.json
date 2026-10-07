@@ -13,12 +13,25 @@
 	"app": {
 		"windows": [
 			{
+				"label": "splash",
+				"title": "Augma DPS Meter",
+				"width": 360,
+				"height": 180,
+				"resizable": false,
+				"maximizable": false,
+				"decorations": false,
+				"center": true,
+				"theme": "Dark",
+				"backgroundColor": "#0a0a0a"
+			},
+			{
 				"label": "main",
 				"title": "Augma DPS Meter",
 				"width": 440,
 				"height": 560,
 				"minWidth": 340,
 				"minHeight": 260,
+				"visible": false,
 				"theme": "Dark",
 				"backgroundColor": "#0a0a0a"
 			}
@@ -42,7 +55,8 @@
 		],
 		"windows": {
 			"nsis": {
-				"installMode": "perMachine"
+				"installMode": "perMachine",
+				"installerHooks": "./windows/hooks.nsh"
 			}
 		}
 	},

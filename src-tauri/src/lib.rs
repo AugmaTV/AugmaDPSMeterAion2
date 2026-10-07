@@ -26,12 +26,14 @@ use crate::engine::Engine;
 use crate::meter::{Meter, Status};
 
 const WINDOW: &str = "main";
+const SPLASH: &str = "splash";
 const OVERLAY: &str = "overlay";
 const LOCK_SHORTCUT: &str = "ctrl+shift+l";
 const FILTER: &str = "tcp";
 const REFRESH: Duration = Duration::from_millis(500);
 const RESCAN: Duration = Duration::from_secs(5);
 const RETRY: Duration = Duration::from_secs(3);
+const UPDATE_TIMEOUT: Duration = Duration::from_secs(8);
 
 static RESET: AtomicBool = AtomicBool::new(false);
 static LOCKED: AtomicBool = AtomicBool::new(false);
@@ -40,6 +42,14 @@ static LOCKED: AtomicBool = AtomicBool::new(false);
 struct OverlayState {
 	open: bool,
 	locked: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(tag = "stage", rename_all = "kebab-case")]
+enum UpdateState {
+	Checking,
+	Downloading { version: String, progress: Option<u64> },
+	Installing { version: String },
 }
 
 #[command]
@@ -86,7 +96,7 @@ pub fn run() {
 				let _ = window.set_focus();
 			}
 		}))
-		.plugin(tauri_plugin_window_state::Builder::new().with_state_flags(StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED).build())
+		.plugin(tauri_plugin_window_state::Builder::new().with_state_flags(StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED).with_denylist(&[SPLASH]).build())
 		.plugin(tauri_plugin_updater::Builder::new().build())
 		.plugin(
 			tauri_plugin_global_shortcut::Builder::new()
@@ -170,17 +180,44 @@ fn capture(app: AppHandle) {
 
 fn update(app: AppHandle) {
 	async_runtime::spawn(async move {
-		let Ok(updater) = app.updater() else {
-			return;
+		let _ = app.emit("update", UpdateState::Checking);
+		let update = match app.updater_builder().restart_after_install(false).timeout(UPDATE_TIMEOUT).build() {
+			Ok(updater) => updater.check().await.ok().flatten(),
+			Err(_) => None,
 		};
-		let Ok(Some(update)) = updater.check().await else {
-			return;
-		};
-		if let Ok(bytes) = update.download(|_, _| {}, || {}).await {
-			pktmon::stop();
-			let _ = update.install(bytes);
+		if let Some(update) = update {
+			let version = update.version.clone();
+			let mut downloaded = 0;
+			let mut reported = None;
+			let download = update.download(
+				|chunk, total| {
+					downloaded += chunk as u64;
+					let progress = total.map(|total| downloaded * 100 / total.max(1));
+					if progress != reported {
+						reported = progress;
+						let _ = app.emit("update", UpdateState::Downloading { version: version.clone(), progress });
+					}
+				},
+				|| {},
+			);
+			if let Ok(bytes) = download.await {
+				let _ = app.emit("update", UpdateState::Installing { version: version.clone() });
+				pktmon::stop();
+				let _ = update.install(bytes);
+			}
 		}
+		reveal(&app);
 	});
+}
+
+fn reveal(app: &AppHandle) {
+	if let Some(window) = app.get_webview_window(WINDOW) {
+		let _ = window.show();
+		let _ = window.set_focus();
+	}
+	if let Some(splash) = app.get_webview_window(SPLASH) {
+		let _ = splash.close();
+	}
 }
 
 fn now() -> u64 {
