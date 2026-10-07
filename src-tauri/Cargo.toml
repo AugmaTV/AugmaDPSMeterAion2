@@ -1,6 +1,6 @@
 [package]
 name = "augma-dps-meter"
-version = "0.4.3"
+version = "0.4.4"
 description = "Augma DPS Meter"
 authors = ["Augma"]
 edition = "2021"
