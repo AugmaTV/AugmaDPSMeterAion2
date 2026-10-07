@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 
 use crate::reader::Reader;
 
@@ -16,6 +16,9 @@ const PARTY_ROSTER: [u8; 2] = [0x00, 0x92];
 const PARTY_MEMBERS: [[u8; 2]; 3] = [[0x0E, 0x92], [0x1A, 0x92], [0x1B, 0x92]];
 const PARTY_PROFILES: [u8; 2] = [0x02, 0x97];
 const PARENT_MARKER: [u8; 8] = [0xFF; 8];
+const ZONE_FLAG: u8 = 0x01;
+const ZONE_POSITION: Range<usize> = 2..14;
+const ZONE_MARKER: [u8; 2] = [0x07, 0x02];
 
 const CRITICAL: u64 = 3;
 const PLAIN_SWITCH: u64 = 0x04;
@@ -227,14 +230,24 @@ fn character(reader: &mut Reader, own: bool) -> Option<Event> {
 fn spawn(reader: &mut Reader) -> Option<Event> {
 	let entity = reader.varint()?;
 	let vitals = SPAWN_MASKS.into_iter().find_map(|width| vitals(reader.rest(), width));
-	let owner = reader
-		.seek(&PARENT_MARKER)
-		.and_then(|_| {
-			reader.skip(8)?;
-			reader.varint()
-		})
-		.filter(|owner| *owner != entity);
+	let owner = reader.seek(&PARENT_MARKER).and_then(|_| {
+		reader.skip(8)?;
+		match reader.varint()? {
+			parent if parent == entity => zone_owner(reader),
+			parent => Some(parent),
+		}
+	});
 	Some(Event::Spawn { entity, owner, vitals })
+}
+
+fn zone_owner(reader: &Reader) -> Option<u64> {
+	let rest = reader.rest();
+	if rest.first() != Some(&ZONE_FLAG) {
+		return None;
+	}
+	let marker = [rest.get(ZONE_POSITION)?, &ZONE_MARKER].concat();
+	let start = rest.windows(marker.len()).position(|window| window == marker)?;
+	Reader::new(rest.get(start + marker.len() + 1..)?).u32().map(u64::from)
 }
 
 fn vitals(data: &[u8], width: usize) -> Option<Vitals> {
@@ -449,6 +462,14 @@ mod tests {
 	fn ignores_self_parent() {
 		let body = bytes("41 36 9a 8c 01 5f 00 00 00 ff ff ff ff ff ff ff ff 80 75 d5 2a bb 03 00 00 9a 8c 01 00");
 		assert_eq!(decode(&body), Some(Event::Spawn { entity: 17946, owner: None, vitals: None }));
+	}
+
+	#[test]
+	fn decodes_zone_owner() {
+		let body = bytes("41 36 f5 88 02 5f 00 00 7b 91 2c 00 40 02 cf 96 05 c7 88 61 89 45 00 d8 d3 45 15 91 67 43 ab a4 01 92 a4 02 92 a4 02 8c 2f 00 00 8c 2f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 f0 c6 02 00 64 00 00 00 f0 49 02 00 01 00 00 00 00 00 00 00 a0 86 01 00 00 00 00 00 70 46 0d 00 01 01 01 11 01 81 96 98 00 ff ff ff ff ff ff ff ff 80 75 d5 2a bb 03 00 00 f5 88 02 01 02 cf 96 05 c7 88 61 89 45 00 d8 d3 45 07 02 06 10 18 00 00");
+		assert!(matches!(decode(&body), Some(Event::Spawn { entity: 33909, owner: Some(6160), .. })));
+		let body = bytes("41 36 fc a1 02 5f 00 00 00 00 a2 93 2c 00 40 02 00 02 14 c7 00 7d 07 c7 00 2c 57 46 98 e5 02 43 15 5d 01 aa 90 03 aa 90 03 51 28 00 00 51 28 00 00 00 00 00 00 00 00 00 00 00 00 00 00 20 3c 03 00 64 00 00 00 f0 49 02 00 01 00 00 00 00 00 00 00 a0 86 01 00 00 00 00 00 60 01 12 00 01 01 02 11 01 81 96 98 00 ff ff ff ff ff ff ff ff 80 75 d5 2a bb 03 00 00 fc a1 02 01 04 00 02 14 c7 00 7d 07 c7 00 2c 57 46 13 02 eb 53 2c 09 88 13 00 00 00 00 00 00 b4 10 6b 86 a0 01 00 00 fc a1 02 01 63 d5 ea 00 00 02 14 c7 00 7d 07 c7 00 2c 57 46 07 02 01 62 1e 00 00");
+		assert!(matches!(decode(&body), Some(Event::Spawn { entity: 37116, owner: Some(7778), .. })));
 	}
 
 	#[test]
