@@ -1,6 +1,6 @@
 export type Status = "unavailable" | "waiting" | "live";
 
-export type Mode = "damage" | "healing";
+export type Mode = "damage" | "healing" | "taken";
 
 export type Skill = {
 	id: number;
@@ -19,9 +19,13 @@ export type Player = {
 	crits: number;
 	healing: number;
 	hps: number;
+	taken: number;
+	dtps: number;
+	takenHits: number;
 	own: boolean;
 	skills: Skill[];
 	heals: Skill[];
+	sources: Skill[];
 };
 
 export type Boss = {
@@ -37,6 +41,7 @@ export type Snapshot = {
 	duration: number;
 	total: number;
 	totalHealing: number;
+	totalTaken: number;
 	boss: Boss | null;
 	players: Player[];
 };
@@ -46,12 +51,34 @@ export type OverlayState = {
 	locked: boolean;
 };
 
+const AMOUNTS: Record<Mode, (player: Player) => number> = {
+	damage: (player) => player.damage,
+	healing: (player) => player.healing,
+	taken: (player) => player.taken,
+};
+
+const RATES: Record<Mode, (player: Player) => number> = {
+	damage: (player) => player.dps,
+	healing: (player) => player.hps,
+	taken: (player) => player.dtps,
+};
+
+const TOTALS: Record<Mode, (snapshot: Snapshot) => number> = {
+	damage: (snapshot) => snapshot.total,
+	healing: (snapshot) => snapshot.totalHealing,
+	taken: (snapshot) => snapshot.totalTaken,
+};
+
 export function amount(player: Player, mode: Mode) {
-	return mode === "damage" ? player.damage : player.healing;
+	return AMOUNTS[mode](player);
 }
 
 export function rate(player: Player, mode: Mode) {
-	return mode === "damage" ? player.dps : player.hps;
+	return RATES[mode](player);
+}
+
+export function total(snapshot: Snapshot, mode: Mode) {
+	return TOTALS[mode](snapshot);
 }
 
 export function ranking(players: Player[], mode: Mode) {

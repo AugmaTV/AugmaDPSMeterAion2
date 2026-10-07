@@ -26,6 +26,7 @@ const SELF_HEALS: [u32; 18] = [
 	11_260_000, 11_720_000, 11_730_000, 12_260_000, 12_350_000, 12_720_000, 13_260_000, 14_710_000, 16_190_000, 16_770_000, 17_240_000, 17_320_000, 17_720_000, 18_160_000, 18_200_000, 18_420_000, 18_720_000, 19_450_000,
 ];
 const SPIRIT_HEALS: [u32; 2] = [16_190_000, 16_770_000];
+const NPC_HEALS: [u32; 1] = [1_801_892];
 const HOT_HEALS: [u32; 4] = [12_350_000, 16_190_000, 17_090_000, 18_120_000];
 const GROUP_HOTS: [u32; 2] = [17_090_000, 18_120_000];
 const KIND_REMAINING: u8 = 0x02;
@@ -118,7 +119,7 @@ fn record(reader: &mut Reader) -> Option<Event> {
 	if switch == PLAIN_SWITCH && (GROUP_HEALS.contains(&family) || (SELF_HEALS.contains(&family) && actor == target)) {
 		return Some(Event::Heal(Heal { target, actor, skill, amount }));
 	}
-	if SPIRIT_HEALS.contains(&family) && actor != target {
+	if (SPIRIT_HEALS.contains(&family) && actor != target) || NPC_HEALS.contains(&skill) {
 		return None;
 	}
 	let drain = if flag & DRAIN_FLAG != 0 { drain(reader, layout, switch).unwrap_or_default() } else { 0 };
@@ -303,6 +304,12 @@ mod tests {
 	#[test]
 	fn ignores_notice_without_damage() {
 		let body = bytes("04 38 9b e0 01 00 00 8b 42 7e 0e f5 00 a2 02 b7 d0 6b 6c 01 00 00");
+		assert_eq!(decode(&body), None);
+	}
+
+	#[test]
+	fn ignores_npc_heal_on_players() {
+		let body = bytes("04 38 e8 14 04 00 b6 47 a4 7e 1b 00 01 02 6f a5 18 6a 01 00 00 00 c3 89 01 a8 19 01 00");
 		assert_eq!(decode(&body), None);
 	}
 

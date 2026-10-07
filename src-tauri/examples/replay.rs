@@ -70,8 +70,8 @@ fn report(at: u64, snapshot: &Snapshot) {
 	let end = at as f64 / 1_000_000.0;
 	let start = end - snapshot.duration as f64 / 1000.0;
 	let boss = snapshot.boss.as_ref().map(|boss| format!("  boss {} {}/{}{}{}", boss.npc.unwrap_or_default(), boss.hp, boss.max, if boss.estimated { "~" } else { "" }, if boss.dead { " mort" } else { "" })).unwrap_or_default();
-	println!("  {start:7.1}–{end:7.1} s  dégâts {}  soins {}{boss}", snapshot.total, snapshot.total_healing);
+	println!("  {start:7.1}–{end:7.1} s  dégâts {}  soins {}  subis {}{boss}", snapshot.total, snapshot.total_healing, snapshot.total_taken);
 	for player in snapshot.players.iter().take(TOP_PLAYERS) {
-		println!("      {:<16} classe {}  dégâts {:>10}  soins {:>9}", player.name.as_deref().unwrap_or("?"), player.class, player.damage, player.healing);
+		println!("      {:<16} classe {}  dégâts {:>10}  soins {:>9}  subis {:>9}", player.name.as_deref().unwrap_or("?"), player.class, player.damage, player.healing, player.taken);
 	}
 }

@@ -11,6 +11,7 @@ const GRACE_MICROS: u64 = 2_000_000;
 const BOSS_HP: u64 = 1_000_000;
 const CLASS_SKILLS: Range<u32> = 11_000_000..20_000_000;
 const SPIRIT_SKILLS: [Range<u32>; 2] = [16_000_000..16_010_000, 16_990_000..17_000_000];
+const MONSTER_SKILLS: Range<u32> = 1_000_000..2_000_000;
 const CLASS_COUNT: usize = 10;
 const DRAIN_SKILL: u32 = 1;
 
@@ -29,6 +30,7 @@ pub struct Snapshot {
 	pub duration: u64,
 	pub total: u64,
 	pub total_healing: u64,
+	pub total_taken: u64,
 	pub boss: Option<Boss>,
 	pub players: Vec<Player>,
 }
@@ -55,9 +57,13 @@ pub struct Player {
 	pub crits: u64,
 	pub healing: u64,
 	pub hps: u64,
+	pub taken: u64,
+	pub dtps: u64,
+	pub taken_hits: u64,
 	pub own: bool,
 	pub skills: Vec<Skill>,
 	pub heals: Vec<Skill>,
+	pub sources: Vec<Skill>,
 }
 
 #[derive(Serialize, Clone)]
@@ -109,8 +115,11 @@ struct Stats {
 	hits: u64,
 	crits: u64,
 	healing: u64,
+	taken: u64,
+	taken_hits: u64,
 	skills: HashMap<u32, Totals>,
 	heals: HashMap<u32, Totals>,
+	sources: HashMap<u32, Totals>,
 }
 
 #[derive(Default)]
@@ -166,7 +175,7 @@ impl Meter {
 
 	pub fn snapshot(&self, status: Status) -> Snapshot {
 		let Some(encounter) = &self.encounter else {
-			return Snapshot { status, duration: 0, total: 0, total_healing: 0, boss: None, players: Vec::new() };
+			return Snapshot { status, duration: 0, total: 0, total_healing: 0, total_taken: 0, boss: None, players: Vec::new() };
 		};
 		let (players, boss) = match &encounter.frozen {
 			Some((players, boss)) => (players.clone(), boss.clone()),
@@ -177,6 +186,7 @@ impl Meter {
 			duration: (encounter.last - encounter.start) / 1000,
 			total: players.iter().map(|player| player.damage).sum(),
 			total_healing: players.iter().map(|player| player.healing).sum(),
+			total_taken: players.iter().map(|player| player.taken).sum(),
 			boss,
 			players,
 		}
@@ -190,7 +200,13 @@ impl Meter {
 			self.vote(hit.actor, hit.target, hit.skill);
 		}
 		let actor = self.owner(hit.actor);
-		if self.is_player(hit.target) || self.owner(hit.target) == actor {
+		if self.is_player(hit.target) {
+			if !self.is_player(actor) {
+				self.take(micros, hit);
+			}
+			return;
+		}
+		if self.owner(hit.target) == actor {
 			return;
 		}
 		let starts = self.is_player(actor);
@@ -252,6 +268,24 @@ impl Meter {
 		stats.healing += heal.amount;
 		skill.amount += heal.amount;
 		skill.hits += 1;
+	}
+
+	fn take(&mut self, micros: u64, hit: Hit) {
+		if !self.active(micros) || (hit.dot && !MONSTER_SKILLS.contains(&hit.skill)) {
+			return;
+		}
+		let npc = self.vitals.get(&hit.actor).and_then(|vitals| vitals.npc).unwrap_or_default();
+		let Some(encounter) = &mut self.encounter else {
+			return;
+		};
+		let stats = encounter.actors.entry(hit.target).or_default();
+		let source = stats.sources.entry(npc).or_default();
+		stats.taken += hit.damage;
+		source.amount += hit.damage;
+		if !hit.dot {
+			stats.taken_hits += 1;
+			source.hits += 1;
+		}
 	}
 
 	fn spawn(&mut self, entity: u64, owner: Option<u64>, vitals: Option<SpawnVitals>) {
@@ -336,7 +370,7 @@ impl Meter {
 		let mut players: Vec<Player> = encounter
 			.actors
 			.iter()
-			.filter(|(id, stats)| self.is_player(**id) && (stats.damage > 0 || stats.healing > 0))
+			.filter(|(id, stats)| self.is_player(**id) && (stats.damage > 0 || stats.healing > 0 || stats.taken > 0))
 			.map(|(id, stats)| Player {
 				id: *id,
 				name: self.names.get(id).cloned(),
@@ -347,9 +381,13 @@ impl Meter {
 				crits: stats.crits,
 				healing: stats.healing,
 				hps: (stats.healing as f64 / seconds) as u64,
+				taken: stats.taken,
+				dtps: (stats.taken as f64 / seconds) as u64,
+				taken_hits: stats.taken_hits,
 				own: self.own == Some(*id),
 				skills: skills(&stats.skills),
 				heals: skills(&stats.heals),
+				sources: skills(&stats.sources),
 			})
 			.collect();
 		players.sort_by_key(|player| Reverse(player.damage));
@@ -493,6 +531,21 @@ mod tests {
 		assert_eq!(snapshot.total_healing, 320);
 		assert_eq!(snapshot.players.iter().find(|player| player.id == 2).unwrap().heals[0].id, 17100000);
 		assert_eq!(snapshot.players.iter().find(|player| player.id == 1).unwrap().heals[0].id, DRAIN_SKILL);
+	}
+
+	#[test]
+	fn counts_damage_taken_by_source() {
+		let mut meter = Meter::default();
+		meter.apply(0, boss(900, 5_000_000));
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, hit(1, 900, 1801966, 400));
+		meter.apply(1_000_000, Event::Hit(Hit { target: 1, actor: 900, skill: 1801966, damage: 50, critical: false, dot: true, drain: 0 }));
+		meter.apply(1_000_000, hit(1, 2, 11020000, 999));
+		meter.apply(1_000_000, Event::Hit(Hit { target: 1, actor: 900, skill: 18730002, damage: 2134, critical: false, dot: true, drain: 0 }));
+		let snapshot = meter.snapshot(Status::Live);
+		let player = snapshot.players.iter().find(|player| player.id == 1).unwrap();
+		assert_eq!((snapshot.total_taken, player.taken, player.taken_hits), (450, 450, 1));
+		assert_eq!(player.sources[0].id, 2301014);
 	}
 
 	#[test]
