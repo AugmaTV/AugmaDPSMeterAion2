@@ -9,11 +9,12 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Duration;
 
 use windows_sys::core::GUID;
 use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_SUCCESS};
 use windows_sys::Win32::System::Diagnostics::Etw::{
-	CloseTrace, ControlTraceW, EnableTraceEx2, OpenTraceW, ProcessTrace, StartTraceW, TdhGetProperty, CONTROLTRACE_HANDLE, EVENT_CONTROL_CODE_ENABLE_PROVIDER, EVENT_RECORD, EVENT_TRACE_CONTROL_STOP,
+	CloseTrace, ControlTraceW, EnableTraceEx2, OpenTraceW, ProcessTrace, StartTraceW, TdhGetProperty, CONTROLTRACE_HANDLE, EVENT_CONTROL_CODE_ENABLE_PROVIDER, EVENT_RECORD, EVENT_TRACE_CONTROL_FLUSH, EVENT_TRACE_CONTROL_STOP,
 	EVENT_TRACE_LOGFILEW, EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE, PROCESS_TRACE_MODE_EVENT_RECORD, PROCESS_TRACE_MODE_REAL_TIME, PROPERTY_DATA_DESCRIPTOR,
 	WNODE_FLAG_TRACED_GUID,
 };
@@ -33,6 +34,7 @@ const BUFFER_KILOBYTES: u32 = 256;
 const MIN_BUFFERS: u32 = 16;
 const MAX_BUFFERS: u32 = 128;
 const FLUSH_SECONDS: u32 = 1;
+const FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 const CLOCK_PERFORMANCE_COUNTER: u32 = 1;
 const FILETIME_UNIX_MICROS: u64 = 11_644_473_600_000_000;
 const NO_WINDOW: u32 = 0x0800_0000;
@@ -131,6 +133,12 @@ fn consume(handle: CONTROLTRACE_HANDLE, name: &[u16], sender: Sender<RawPacket>)
 		drop(Box::from_raw(consumer as *mut Consumer));
 		RUNNING.store(false, Ordering::Relaxed);
 	});
+	let name = name.to_vec();
+	thread::spawn(move || {
+		while unsafe { ControlTraceW(CONTROLTRACE_HANDLE::default(), name.as_ptr(), Properties::new().as_mut_ptr(), EVENT_TRACE_CONTROL_FLUSH) } == ERROR_SUCCESS {
+			thread::sleep(FLUSH_INTERVAL);
+		}
+	});
 	Ok(())
 }
 
@@ -185,7 +193,7 @@ fn property(record: &EVENT_RECORD, name: &[u16], buffer: &mut [u8]) -> bool {
 
 fn wifi(frame: &[u8]) -> Option<&[u8]> {
 	let control = frame.get(..2)?;
-	if (control[0] >> 2) & 0x03 != 2 || control[1] & 0x40 != 0 {
+	if (control[0] >> 2) & 0x03 != 2 {
 		return None;
 	}
 	let mut header = 24;
@@ -239,4 +247,24 @@ fn check(status: u32) -> Result<(), String> {
 
 fn wide(text: &str) -> Vec<u16> {
 	text.encode_utf16().chain([0]).collect()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn strips_decrypted_wifi_header() {
+		let mut frame = vec![0x88, 0x42];
+		frame.extend([0; 24]);
+		frame.extend(SNAP_HEADER);
+		frame.extend(ETHERTYPE_IPV4);
+		frame.extend([0x45, 0x00]);
+		assert_eq!(wifi(&frame), Some(&[0x45, 0x00][..]));
+	}
+
+	#[test]
+	fn ignores_management_frames() {
+		assert_eq!(wifi(&[0x80, 0x00, 0x00, 0x00]), None);
+	}
 }
