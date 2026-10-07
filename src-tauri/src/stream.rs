@@ -18,6 +18,7 @@ const SEQUENCE_ORIGIN: u64 = 1 << 32;
 
 pub enum Delivery<'a> {
 	Start,
+	Join,
 	Reset,
 	Data(&'a [u8]),
 }
@@ -107,7 +108,7 @@ impl Stream {
 			gap_since: None,
 			last_seen: micros,
 		});
-		sink(if synced { Delivery::Start } else { Delivery::Reset });
+		sink(if synced { Delivery::Start } else { Delivery::Join });
 		for buffered in candidate.segments.iter().skip(skipped) {
 			lock.accept(buffered.micros, buffered.sequence, &buffered.payload, sink);
 		}

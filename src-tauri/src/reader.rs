@@ -18,6 +18,10 @@ impl<'a> Reader<'a> {
 		Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
 	}
 
+	pub fn u64(&mut self) -> Option<u64> {
+		Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
+	}
+
 	pub fn varint(&mut self) -> Option<u64> {
 		let (value, width) = varint(&self.data[self.offset..])?;
 		self.offset += width;
@@ -39,8 +43,12 @@ impl<'a> Reader<'a> {
 		Some(())
 	}
 
+	pub fn rest(&self) -> &'a [u8] {
+		&self.data[self.offset..]
+	}
+
 	fn take(&mut self, count: usize) -> Option<&'a [u8]> {
-		let slice = self.data.get(self.offset..self.offset + count)?;
+		let slice = self.data.get(self.offset..self.offset.checked_add(count)?)?;
 		self.offset += count;
 		Some(slice)
 	}

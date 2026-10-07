@@ -18,7 +18,14 @@ impl Engine {
 		};
 		let Engine { stream, framer, meter } = self;
 		stream.push(micros, &segment, &mut |delivery| match delivery {
-			Delivery::Start => framer.start(),
+			Delivery::Start => {
+				framer.start();
+				meter.reconnect(micros);
+			}
+			Delivery::Join => {
+				framer.reset();
+				meter.reconnect(micros);
+			}
 			Delivery::Reset => framer.reset(),
 			Delivery::Data(data) => framer.push(data, &mut |body| {
 				if let Some(event) = packet::decode(body) {

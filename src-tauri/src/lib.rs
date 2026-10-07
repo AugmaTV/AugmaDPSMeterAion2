@@ -1,7 +1,7 @@
 pub mod capture;
-mod engine;
+pub mod engine;
 pub mod frame;
-mod meter;
+pub mod meter;
 pub mod net;
 pub mod npcap;
 pub mod packet;
@@ -15,9 +15,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{async_runtime, command, generate_context, generate_handler, AppHandle, Builder, Emitter, Manager, Result, RunEvent};
+use serde::Serialize;
+use tauri::{async_runtime, command, generate_context, generate_handler, AppHandle, Builder, Emitter, Manager, Result, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_window_state::StateFlags;
@@ -26,24 +25,21 @@ use crate::capture::Source;
 use crate::engine::Engine;
 use crate::meter::{Meter, Status};
 
+const WINDOW: &str = "main";
 const OVERLAY: &str = "overlay";
-const FILTER: &str = "tcp";
 const LOCK_SHORTCUT: &str = "ctrl+shift+l";
+const FILTER: &str = "tcp";
 const REFRESH: Duration = Duration::from_millis(500);
 const RESCAN: Duration = Duration::from_secs(5);
 const RETRY: Duration = Duration::from_secs(3);
 
-static LOCKED: AtomicBool = AtomicBool::new(true);
 static RESET: AtomicBool = AtomicBool::new(false);
+static LOCKED: AtomicBool = AtomicBool::new(false);
 
-#[command]
-fn locked() -> bool {
-	LOCKED.load(Ordering::Relaxed)
-}
-
-#[command]
-fn lock(app: AppHandle) {
-	set_locked(&app, true);
+#[derive(Serialize, Clone)]
+struct OverlayState {
+	open: bool,
+	locked: bool,
 }
 
 #[command]
@@ -51,26 +47,72 @@ fn reset() {
 	RESET.store(true, Ordering::Relaxed);
 }
 
+#[command]
+fn overlay(app: AppHandle) -> OverlayState {
+	OverlayState { open: app.get_webview_window(OVERLAY).is_some(), locked: LOCKED.load(Ordering::Relaxed) }
+}
+
+#[command]
+async fn toggle_overlay(app: AppHandle) -> Result<()> {
+	if let Some(window) = app.get_webview_window(OVERLAY) {
+		return window.close();
+	}
+	LOCKED.store(false, Ordering::Relaxed);
+	WebviewWindowBuilder::new(&app, OVERLAY, WebviewUrl::default())
+		.title("Augma DPS Overlay")
+		.inner_size(300.0, 220.0)
+		.min_inner_size(200.0, 100.0)
+		.decorations(false)
+		.transparent(true)
+		.shadow(false)
+		.always_on_top(true)
+		.skip_taskbar(true)
+		.focused(false)
+		.build()?;
+	let _ = app.global_shortcut().register(LOCK_SHORTCUT);
+	app.emit("overlay", OverlayState { open: true, locked: false })
+}
+
+#[command]
+fn lock_overlay(app: AppHandle, locked: bool) {
+	set_locked(&app, locked);
+}
+
 pub fn run() {
 	Builder::default()
-		.plugin(tauri_plugin_single_instance::init(|_, _, _| {}))
-		.plugin(tauri_plugin_window_state::Builder::new().with_state_flags(StateFlags::POSITION | StateFlags::SIZE).build())
+		.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+			if let Some(window) = app.get_webview_window(WINDOW) {
+				let _ = window.unminimize();
+				let _ = window.set_focus();
+			}
+		}))
+		.plugin(tauri_plugin_window_state::Builder::new().with_state_flags(StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED).build())
 		.plugin(tauri_plugin_updater::Builder::new().build())
 		.plugin(
 			tauri_plugin_global_shortcut::Builder::new()
 				.with_handler(|app, _, event| {
 					if event.state == ShortcutState::Pressed {
-						toggle_lock(app);
+						set_locked(app, !LOCKED.load(Ordering::Relaxed));
 					}
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![locked, lock, reset])
+		.invoke_handler(generate_handler![reset, overlay, toggle_overlay, lock_overlay])
+		.on_window_event(|window, event| {
+			if !matches!(event, WindowEvent::Destroyed) {
+				return;
+			}
+			let app = window.app_handle();
+			if window.label() == WINDOW {
+				app.exit(0);
+			} else if window.label() == OVERLAY {
+				LOCKED.store(false, Ordering::Relaxed);
+				let _ = app.global_shortcut().unregister(LOCK_SHORTCUT);
+				let _ = app.emit("overlay", OverlayState { open: false, locked: false });
+			}
+		})
 		.setup(|app| {
 			let handle = app.handle();
-			let _ = handle.global_shortcut().register(LOCK_SHORTCUT);
-			set_locked(handle, true);
-			tray(handle)?;
 			capture(handle.clone());
 			update(handle.clone());
 			Ok(())
@@ -84,34 +126,12 @@ pub fn run() {
 		});
 }
 
-fn tray(app: &AppHandle) -> Result<()> {
-	let toggle = MenuItem::with_id(app, "toggle", "Verrouiller / déverrouiller (Ctrl+Shift+L)", true, None::<&str>)?;
-	let reset = MenuItem::with_id(app, "reset", "Réinitialiser", true, None::<&str>)?;
-	let quit = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
-	TrayIconBuilder::new()
-		.icon(app.default_window_icon().expect("icône manquante").clone())
-		.tooltip("Augma DPS Meter")
-		.menu(&Menu::with_items(app, &[&toggle, &reset, &quit])?)
-		.on_menu_event(|app, event| match event.id.as_ref() {
-			"toggle" => toggle_lock(app),
-			"reset" => RESET.store(true, Ordering::Relaxed),
-			"quit" => app.exit(0),
-			_ => {}
-		})
-		.build(app)?;
-	Ok(())
-}
-
-fn toggle_lock(app: &AppHandle) {
-	set_locked(app, !LOCKED.load(Ordering::Relaxed));
-}
-
 fn set_locked(app: &AppHandle, locked: bool) {
 	LOCKED.store(locked, Ordering::Relaxed);
 	if let Some(window) = app.get_webview_window(OVERLAY) {
 		let _ = window.set_ignore_cursor_events(locked);
 	}
-	let _ = app.emit("locked", locked);
+	let _ = app.emit("overlay", OverlayState { open: app.get_webview_window(OVERLAY).is_some(), locked });
 }
 
 fn capture(app: AppHandle) {
