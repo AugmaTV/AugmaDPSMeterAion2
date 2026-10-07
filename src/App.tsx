@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Lock, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type Status = "npcap-missing" | "no-device" | "waiting" | "live";
+type Status = "unavailable" | "waiting" | "live";
 
 type Player = {
 	id: number;
@@ -38,8 +37,6 @@ const CLASSES = [
 	{ name: "Aède", color: "bg-teal-600" },
 	{ name: "Brawler", color: "bg-red-600" },
 ];
-
-const NPCAP_URL = "https://npcap.com/#download";
 
 function format(value: number) {
 	if (value >= 1_000_000) {
@@ -94,14 +91,8 @@ export default function App() {
 				)}
 			</header>
 			<section className="flex flex-1 flex-col gap-1 overflow-y-auto p-1.5">
-				{snapshot?.status === "npcap-missing" && (
-					<div className="flex flex-1 flex-col items-center justify-center gap-2 p-2 text-center text-xs">
-						<p>Npcap n'est pas installé. Il est nécessaire pour lire le trafic du jeu.</p>
-						<Button size="xs" onClick={() => openUrl(NPCAP_URL)}>Télécharger Npcap</Button>
-					</div>
-				)}
-				{snapshot?.status === "no-device" && (
-					<p className="m-auto p-2 text-center text-xs">Npcap n'a accès à aucune carte réseau. Réinstalle-le sans cocher « Restrict Npcap driver's access to Administrators only ».</p>
+				{snapshot?.status === "unavailable" && (
+					<p className="m-auto p-2 text-center text-xs">Impossible de lire le trafic réseau. Relance le meter et accepte la demande administrateur.</p>
 				)}
 				{(snapshot === null || snapshot.status === "waiting" || snapshot.status === "live") && players.length === 0 && (
 					<p className="m-auto text-xs text-white/50">{snapshot?.status === "live" ? "En attente d'un combat…" : "En attente du jeu…"}</p>

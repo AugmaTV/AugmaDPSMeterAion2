@@ -13,8 +13,7 @@ const CLASS_COUNT: usize = 10;
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub enum Status {
-	NpcapMissing,
-	NoDevice,
+	Unavailable,
 	Waiting,
 	Live,
 }

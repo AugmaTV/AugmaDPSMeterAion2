@@ -9,6 +9,8 @@ use std::thread;
 
 use libloading::os::windows::{Library, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR};
 
+use crate::capture::RawPacket;
+
 const ERROR_SIZE: usize = 256;
 const SNAPLEN: c_int = 262144;
 const TIMEOUT_MILLIS: c_int = 100;
@@ -76,12 +78,6 @@ struct Capture {
 	npcap: Arc<Npcap>,
 	handle: *mut c_void,
 	linktype: i32,
-}
-
-pub struct RawPacket {
-	pub micros: u64,
-	pub linktype: i32,
-	pub data: Vec<u8>,
 }
 
 unsafe impl Send for Capture {}

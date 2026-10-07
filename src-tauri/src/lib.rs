@@ -1,3 +1,4 @@
+pub mod capture;
 mod engine;
 pub mod frame;
 mod meter;
@@ -5,32 +6,32 @@ pub mod net;
 pub mod npcap;
 pub mod packet;
 pub mod pcap;
+pub mod pktmon;
 mod reader;
 pub mod stream;
 
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{async_runtime, command, generate_context, generate_handler, AppHandle, Builder, Emitter, Manager, Result};
+use tauri::{async_runtime, command, generate_context, generate_handler, AppHandle, Builder, Emitter, Manager, Result, RunEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_window_state::StateFlags;
 
+use crate::capture::Source;
 use crate::engine::Engine;
 use crate::meter::{Meter, Status};
-use crate::npcap::Npcap;
 
 const OVERLAY: &str = "overlay";
 const FILTER: &str = "tcp";
 const LOCK_SHORTCUT: &str = "ctrl+shift+l";
 const REFRESH: Duration = Duration::from_millis(500);
 const RESCAN: Duration = Duration::from_secs(5);
-const RETRY: Duration = Duration::from_secs(1);
+const RETRY: Duration = Duration::from_secs(3);
 
 static LOCKED: AtomicBool = AtomicBool::new(true);
 static RESET: AtomicBool = AtomicBool::new(false);
@@ -54,7 +55,6 @@ pub fn run() {
 	Builder::default()
 		.plugin(tauri_plugin_single_instance::init(|_, _, _| {}))
 		.plugin(tauri_plugin_window_state::Builder::new().with_state_flags(StateFlags::POSITION | StateFlags::SIZE).build())
-		.plugin(tauri_plugin_opener::init())
 		.plugin(tauri_plugin_updater::Builder::new().build())
 		.plugin(
 			tauri_plugin_global_shortcut::Builder::new()
@@ -75,8 +75,13 @@ pub fn run() {
 			update(handle.clone());
 			Ok(())
 		})
-		.run(generate_context!())
-		.expect("error while running tauri application");
+		.build(generate_context!())
+		.expect("error while running tauri application")
+		.run(|_, event| {
+			if let RunEvent::Exit = event {
+				pktmon::stop();
+			}
+		});
 }
 
 fn tray(app: &AppHandle) -> Result<()> {
@@ -111,28 +116,23 @@ fn set_locked(app: &AppHandle, locked: bool) {
 
 fn capture(app: AppHandle) {
 	thread::spawn(move || {
-		let npcap = match Npcap::load() {
-			Some(npcap) => npcap,
-			None => {
-				set_locked(&app, false);
-				loop {
-					idle(&app, Status::NpcapMissing);
-					if let Some(npcap) = Npcap::load() {
-						break npcap;
-					}
+		let (sender, receiver) = mpsc::channel();
+		let source = loop {
+			match Source::open(FILTER, &sender) {
+				Ok(source) => break source,
+				Err(_) => {
+					let _ = app.emit("snapshot", Meter::default().snapshot(Status::Unavailable));
+					thread::sleep(RETRY);
 				}
 			}
 		};
-		let (sender, receiver) = mpsc::channel();
-		let active = Arc::new(Mutex::new(HashSet::new()));
 		let mut engine = Engine::default();
-		let mut available = false;
-		let mut scanned: Option<Instant> = None;
+		let mut scanned = Instant::now();
 		let mut emitted = Instant::now();
 		loop {
-			if scanned.is_none_or(|instant| instant.elapsed() >= RESCAN) {
-				available = npcap::listen(&npcap, FILTER, &sender, &active).is_ok_and(|count| count > 0);
-				scanned = Some(Instant::now());
+			if scanned.elapsed() >= RESCAN {
+				source.refresh(FILTER, &sender);
+				scanned = Instant::now();
 			}
 			if let Ok(packet) = receiver.recv_timeout(REFRESH) {
 				engine.process(packet.micros, packet.linktype, &packet.data);
@@ -141,17 +141,11 @@ fn capture(app: AppHandle) {
 				engine.reset();
 			}
 			if emitted.elapsed() >= REFRESH {
-				let snapshot = if available { engine.snapshot(now()) } else { Meter::default().snapshot(Status::NoDevice) };
-				let _ = app.emit("snapshot", snapshot);
+				let _ = app.emit("snapshot", engine.snapshot(now()));
 				emitted = Instant::now();
 			}
 		}
 	});
-}
-
-fn idle(app: &AppHandle, status: Status) {
-	let _ = app.emit("snapshot", Meter::default().snapshot(status));
-	thread::sleep(RETRY);
 }
 
 fn update(app: AppHandle) {
@@ -159,8 +153,12 @@ fn update(app: AppHandle) {
 		let Ok(updater) = app.updater() else {
 			return;
 		};
-		if let Ok(Some(update)) = updater.check().await {
-			let _ = update.download_and_install(|_, _| {}, || {}).await;
+		let Ok(Some(update)) = updater.check().await else {
+			return;
+		};
+		if let Ok(bytes) = update.download(|_, _| {}, || {}).await {
+			pktmon::stop();
+			let _ = update.install(bytes);
 		}
 	});
 }
