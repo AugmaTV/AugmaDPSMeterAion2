@@ -88,8 +88,11 @@ pub struct Meter {
 	party: HashSet<u64>,
 	roster: HashSet<u64>,
 	party_only: bool,
+	dungeon: bool,
 	map: Option<u32>,
+	zone: u32,
 	encounter: Option<Encounter>,
+	history: Vec<(u64, Vec<Player>)>,
 }
 
 #[derive(Default)]
@@ -106,6 +109,7 @@ struct Vitals {
 }
 
 struct Encounter {
+	zone: u32,
 	start: u64,
 	last: u64,
 	ended: Option<u64>,
@@ -156,6 +160,9 @@ impl Meter {
 				if self.map != Some(map) || (!revive && !self.boss_in_combat(None)) {
 					self.end(micros);
 				}
+				if self.map != Some(map) {
+					self.zone += 1;
+				}
 				self.map = Some(map);
 			}
 			Event::PartyMember { entity } => self.join(entity),
@@ -189,10 +196,15 @@ impl Meter {
 
 	pub fn reset(&mut self) {
 		self.encounter = None;
+		self.history.clear();
 	}
 
 	pub fn set_party_only(&mut self, enabled: bool) {
 		self.party_only = enabled;
+	}
+
+	pub fn set_dungeon(&mut self, enabled: bool) {
+		self.dungeon = enabled;
 	}
 
 	pub fn snapshot(&self, status: Status) -> Snapshot {
@@ -203,12 +215,29 @@ impl Meter {
 			Some((players, boss)) => (players.clone(), boss.clone()),
 			None => (self.players(encounter), self.boss(encounter)),
 		};
+		let start = match self.history.first() {
+			Some((start, _)) if self.dungeon => *start,
+			_ => encounter.start,
+		};
+		if self.dungeon {
+			for (_, fighters) in &self.history {
+				for fighter in fighters {
+					merge(&mut players, fighter);
+				}
+			}
+			for player in &mut players {
+				player.dps = per_second(player.damage, encounter.last - start);
+				player.hps = per_second(player.healing, encounter.last - start);
+				player.dtps = per_second(player.taken, encounter.last - start);
+			}
+			players.sort_by_key(|player| Reverse(player.damage));
+		}
 		if self.party_only {
 			players.retain(|player| player.member);
 		}
 		Snapshot {
 			status,
-			duration: (encounter.last - encounter.start) / 1000,
+			duration: (encounter.last - start) / 1000,
 			total: players.iter().map(|player| player.damage).sum(),
 			total_healing: players.iter().map(|player| player.healing).sum(),
 			total_taken: players.iter().map(|player| player.taken).sum(),
@@ -242,7 +271,7 @@ impl Meter {
 				if dead || !starts {
 					return;
 				}
-				self.encounter = None;
+				self.archive();
 			}
 		} else if dead && !self.encounter.as_ref().is_some_and(|encounter| encounter.targets.contains_key(&hit.target)) {
 			return;
@@ -253,7 +282,7 @@ impl Meter {
 				vitals.before += hit.damage;
 			}
 		}
-		let encounter = self.encounter.get_or_insert_with(|| Encounter { start: micros, last: micros, ended: None, targets: HashMap::new(), actors: HashMap::new(), members: self.party.clone(), frozen: None });
+		let encounter = self.encounter.get_or_insert_with(|| Encounter { zone: self.zone, start: micros, last: micros, ended: None, targets: HashMap::new(), actors: HashMap::new(), members: self.party.clone(), frozen: None });
 		if starts {
 			encounter.last = encounter.last.max(micros);
 			*encounter.targets.entry(hit.target).or_default() += hit.damage;
@@ -366,6 +395,21 @@ impl Meter {
 		}
 	}
 
+	fn archive(&mut self) {
+		let Some(encounter) = self.encounter.take() else {
+			return;
+		};
+		if encounter.zone != self.zone {
+			self.history.clear();
+			return;
+		}
+		let players = match encounter.frozen {
+			Some((players, _)) => players,
+			None => self.players(&encounter),
+		};
+		self.history.push((encounter.start, players));
+	}
+
 	fn join(&mut self, entity: u64) {
 		self.party.insert(entity);
 		if let Some(encounter) = &mut self.encounter {
@@ -398,7 +442,7 @@ impl Meter {
 	}
 
 	fn players(&self, encounter: &Encounter) -> Vec<Player> {
-		let seconds = ((encounter.last - encounter.start) as f64 / 1_000_000.0).max(1.0);
+		let elapsed = encounter.last - encounter.start;
 		let mut players: Vec<Player> = encounter
 			.actors
 			.iter()
@@ -408,13 +452,13 @@ impl Meter {
 				name: self.names.get(id).cloned(),
 				class: self.class_of(*id),
 				damage: stats.damage,
-				dps: (stats.damage as f64 / seconds) as u64,
+				dps: per_second(stats.damage, elapsed),
 				hits: stats.hits,
 				crits: stats.crits,
 				healing: stats.healing,
-				hps: (stats.healing as f64 / seconds) as u64,
+				hps: per_second(stats.healing, elapsed),
 				taken: stats.taken,
-				dtps: (stats.taken as f64 / seconds) as u64,
+				dtps: per_second(stats.taken, elapsed),
 				taken_hits: stats.taken_hits,
 				own: self.own == Some(*id),
 				member: self.own.is_none_or(|own| own == *id || encounter.members.contains(id)),
@@ -472,6 +516,46 @@ fn base_skill(skill: u32) -> u32 {
 	} else {
 		skill
 	}
+}
+
+fn per_second(amount: u64, micros: u64) -> u64 {
+	(amount as f64 / (micros as f64 / 1_000_000.0).max(1.0)) as u64
+}
+
+fn merge(players: &mut Vec<Player>, fighter: &Player) {
+	let Some(player) = players.iter_mut().find(|player| player.id == fighter.id) else {
+		players.push(fighter.clone());
+		return;
+	};
+	player.name = player.name.take().or_else(|| fighter.name.clone());
+	if player.class == 0 {
+		player.class = fighter.class;
+	}
+	player.damage += fighter.damage;
+	player.hits += fighter.hits;
+	player.crits += fighter.crits;
+	player.healing += fighter.healing;
+	player.taken += fighter.taken;
+	player.taken_hits += fighter.taken_hits;
+	player.own |= fighter.own;
+	player.member |= fighter.member;
+	combine(&mut player.skills, &fighter.skills);
+	combine(&mut player.heals, &fighter.heals);
+	combine(&mut player.sources, &fighter.sources);
+}
+
+fn combine(skills: &mut Vec<Skill>, others: &[Skill]) {
+	for other in others {
+		match skills.iter_mut().find(|skill| skill.id == other.id) {
+			Some(skill) => {
+				skill.amount += other.amount;
+				skill.hits += other.hits;
+				skill.crits += other.crits;
+			}
+			None => skills.push(other.clone()),
+		}
+	}
+	skills.sort_by_key(|skill| Reverse(skill.amount));
 }
 
 fn skills(totals: &HashMap<u32, Totals>) -> Vec<Skill> {
@@ -646,6 +730,33 @@ mod tests {
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(0, hit(900, 3, 11020000, 100));
 		assert_eq!(meter.snapshot(Status::Live).players.len(), 2);
+	}
+
+	#[test]
+	fn accumulates_whole_dungeon() {
+		let mut meter = Meter::default();
+		meter.set_dungeon(true);
+		meter.apply(0, Event::MapChange { map: 600082, revive: false });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, Event::MapChange { map: 600082, revive: false });
+		meter.apply(IDLE_MICROS * 2, hit(901, 1, 11020000, 40));
+		let snapshot = meter.snapshot(Status::Live);
+		assert_eq!((snapshot.total, snapshot.duration, snapshot.players[0].dps), (140, IDLE_MICROS * 2 / 1000, 4));
+		assert_eq!((snapshot.players[0].skills.len(), snapshot.players[0].skills[0].amount), (1, 140));
+		meter.set_dungeon(false);
+		assert_eq!(meter.snapshot(Status::Live).total, 40);
+	}
+
+	#[test]
+	fn restarts_dungeon_total_on_new_map() {
+		let mut meter = Meter::default();
+		meter.set_dungeon(true);
+		meter.apply(0, Event::MapChange { map: 600082, revive: false });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, Event::MapChange { map: 100001, revive: false });
+		assert_eq!(meter.snapshot(Status::Live).total, 100);
+		meter.apply(2_000_000, hit(901, 1, 11020000, 40));
+		assert_eq!(meter.snapshot(Status::Live).total, 40);
 	}
 
 	#[test]

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Lock, LockOpen, PictureInPicture2, RotateCcw, Users } from "lucide-react";
+import { Castle, Lock, LockOpen, PictureInPicture2, RotateCcw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BossBar } from "@/components/boss-bar";
@@ -16,6 +16,7 @@ export default function App() {
 	const [mode, setMode] = useState<Mode>("damage");
 	const [overlay, setOverlay] = useState<OverlayState>({ open: false, locked: false });
 	const [partyOnly, setPartyOnly] = useState(true);
+	const [dungeon, setDungeon] = useState(false);
 
 	useEffect(() => {
 		const listeners = Promise.all([
@@ -27,6 +28,7 @@ export default function App() {
 		]);
 		invoke<OverlayState>("overlay").then(setOverlay);
 		invoke<boolean>("party_only").then(setPartyOnly);
+		invoke<boolean>("dungeon").then(setDungeon);
 		return () => {
 			listeners.then((unlisteners) => unlisteners.forEach((unlisten) => unlisten()));
 		};
@@ -41,6 +43,9 @@ export default function App() {
 				<span className="ml-auto font-semibold tabular-nums lg:invisible">{compact(totalRate(snapshot?.players ?? [], mode))}/s</span>
 				<Button variant={partyOnly ? "secondary" : "ghost"} size="icon-sm" title={partyOnly ? "Afficher tous les joueurs" : "Afficher seulement moi et mon groupe"} onClick={() => invoke("set_party_only", { enabled: !partyOnly }).then(() => setPartyOnly(!partyOnly))}>
 					<Users />
+				</Button>
+				<Button variant={dungeon ? "secondary" : "ghost"} size="icon-sm" title={dungeon ? "Afficher seulement le combat en cours" : "Cumuler tous les combats du donjon"} onClick={() => invoke("set_dungeon", { enabled: !dungeon }).then(() => setDungeon(!dungeon))}>
+					<Castle />
 				</Button>
 				{overlay.open && (
 					<Button variant="ghost" size="icon-sm" title={overlay.locked ? "Déverrouiller les overlays (Ctrl+Shift+L)" : "Verrouiller les overlays (Ctrl+Shift+L)"} onClick={() => invoke("lock_overlay", { locked: !overlay.locked })}>

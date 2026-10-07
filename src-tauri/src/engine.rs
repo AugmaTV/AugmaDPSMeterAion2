@@ -43,6 +43,10 @@ impl Engine {
 		self.meter.set_party_only(enabled);
 	}
 
+	pub fn set_dungeon(&mut self, enabled: bool) {
+		self.meter.set_dungeon(enabled);
+	}
+
 	pub fn snapshot(&self, micros: u64) -> Snapshot {
 		self.meter.snapshot(if self.stream.is_live(micros) { Status::Live } else { Status::Waiting })
 	}
