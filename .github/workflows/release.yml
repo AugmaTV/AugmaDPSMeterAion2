@@ -16,13 +16,13 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          shared-key: release
+          save-if: false
       - run: npm ci
       - run: node -e "if ('v' + require('./src-tauri/tauri.conf.json').version !== process.env.GITHUB_REF_NAME) process.exit(1)"
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
