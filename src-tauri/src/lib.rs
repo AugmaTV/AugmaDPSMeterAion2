@@ -11,12 +11,12 @@ mod reader;
 pub mod stream;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{async_runtime, command, generate_context, generate_handler, AppHandle, Builder, Emitter, Manager, Result, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{async_runtime, command, generate_context, generate_handler, AppHandle, Builder, Emitter, Manager, Result, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_window_state::StateFlags;
@@ -38,6 +38,7 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 static RESET: AtomicBool = AtomicBool::new(false);
 static LOCKED: AtomicBool = AtomicBool::new(false);
+static OPENING: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize, Clone)]
 struct OverlayState {
@@ -60,16 +61,17 @@ fn reset() {
 
 #[command]
 fn overlay(app: AppHandle) -> OverlayState {
-	OverlayState { open: app.get_webview_window(OVERLAY).is_some(), locked: LOCKED.load(Ordering::Relaxed) }
+	OverlayState { open: overlays(&app).next().is_some(), locked: LOCKED.load(Ordering::Relaxed) }
 }
 
 #[command]
-async fn toggle_overlay(app: AppHandle) -> Result<()> {
-	if let Some(window) = app.get_webview_window(OVERLAY) {
-		return window.close();
+async fn open_overlay(app: AppHandle, mode: String) -> Result<()> {
+	let _opening = OPENING.lock();
+	let mut index = 1;
+	while app.get_webview_window(&format!("{OVERLAY}-{mode}-{index}")).is_some() {
+		index += 1;
 	}
-	LOCKED.store(false, Ordering::Relaxed);
-	WebviewWindowBuilder::new(&app, OVERLAY, WebviewUrl::default())
+	WebviewWindowBuilder::new(&app, format!("{OVERLAY}-{mode}-{index}"), WebviewUrl::default())
 		.title("Augma DPS Overlay")
 		.inner_size(300.0, 220.0)
 		.min_inner_size(200.0, 100.0)
@@ -81,7 +83,8 @@ async fn toggle_overlay(app: AppHandle) -> Result<()> {
 		.focused(false)
 		.build()?;
 	let _ = app.global_shortcut().register(LOCK_SHORTCUT);
-	app.emit("overlay", OverlayState { open: true, locked: false })
+	set_locked(&app, false);
+	Ok(())
 }
 
 #[command]
@@ -108,7 +111,7 @@ pub fn run() {
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![reset, overlay, toggle_overlay, lock_overlay])
+		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay])
 		.on_window_event(|window, event| {
 			if !matches!(event, WindowEvent::Destroyed) {
 				return;
@@ -116,7 +119,7 @@ pub fn run() {
 			let app = window.app_handle();
 			if window.label() == WINDOW {
 				app.exit(0);
-			} else if window.label() == OVERLAY {
+			} else if window.label().starts_with(OVERLAY) && overlays(app).all(|overlay| overlay.label() == window.label()) {
 				LOCKED.store(false, Ordering::Relaxed);
 				let _ = app.global_shortcut().unregister(LOCK_SHORTCUT);
 				let _ = app.emit("overlay", OverlayState { open: false, locked: false });
@@ -139,10 +142,14 @@ pub fn run() {
 
 fn set_locked(app: &AppHandle, locked: bool) {
 	LOCKED.store(locked, Ordering::Relaxed);
-	if let Some(window) = app.get_webview_window(OVERLAY) {
-		let _ = window.set_ignore_cursor_events(locked);
+	for overlay in overlays(app) {
+		let _ = overlay.set_ignore_cursor_events(locked);
 	}
-	let _ = app.emit("overlay", OverlayState { open: app.get_webview_window(OVERLAY).is_some(), locked });
+	let _ = app.emit("overlay", OverlayState { open: overlays(app).next().is_some(), locked });
+}
+
+fn overlays(app: &AppHandle) -> impl Iterator<Item = WebviewWindow> {
+	app.webview_windows().into_values().filter(|window| window.label().starts_with(OVERLAY))
 }
 
 fn capture(app: AppHandle) {

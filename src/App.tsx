@@ -50,11 +50,11 @@ export default function App() {
 				<span className="text-muted-foreground tabular-nums">{clock(snapshot?.duration ?? 0)}</span>
 				<span className="ml-auto font-semibold tabular-nums">{compact(totalRate)}/s</span>
 				{overlay.open && (
-					<Button variant="ghost" size="icon-sm" title={overlay.locked ? "Déverrouiller l'overlay (Ctrl+Shift+L)" : "Verrouiller l'overlay (Ctrl+Shift+L)"} onClick={() => invoke("lock_overlay", { locked: !overlay.locked })}>
+					<Button variant="ghost" size="icon-sm" title={overlay.locked ? "Déverrouiller les overlays (Ctrl+Shift+L)" : "Verrouiller les overlays (Ctrl+Shift+L)"} onClick={() => invoke("lock_overlay", { locked: !overlay.locked })}>
 						{overlay.locked ? <Lock /> : <LockOpen />}
 					</Button>
 				)}
-				<Button variant={overlay.open ? "secondary" : "ghost"} size="icon-sm" title={overlay.open ? "Fermer l'overlay" : "Ouvrir l'overlay"} onClick={() => invoke("toggle_overlay")}>
+				<Button variant={overlay.open ? "secondary" : "ghost"} size="icon-sm" title="Ouvrir un overlay sur l'onglet actif" onClick={() => invoke("open_overlay", { mode })}>
 					<PictureInPicture2 />
 				</Button>
 				<Button variant="ghost" size="icon-sm" title="Réinitialiser" onClick={() => invoke("reset")}>
