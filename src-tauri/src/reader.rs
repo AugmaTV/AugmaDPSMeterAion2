@@ -3,11 +3,24 @@ const MAX_VARINT: usize = 10;
 pub struct Reader<'a> {
 	data: &'a [u8],
 	offset: usize,
+	bits: u8,
+	left: u8,
 }
 
 impl<'a> Reader<'a> {
 	pub fn new(data: &'a [u8]) -> Self {
-		Reader { data, offset: 0 }
+		Reader { data, offset: 0, bits: 0, left: 0 }
+	}
+
+	pub fn bit(&mut self) -> Option<bool> {
+		if self.left == 0 {
+			self.bits = self.u8()?;
+			self.left = 8;
+		}
+		let bit = self.bits & 1 == 1;
+		self.bits >>= 1;
+		self.left -= 1;
+		Some(bit)
 	}
 
 	pub fn u8(&mut self) -> Option<u8> {

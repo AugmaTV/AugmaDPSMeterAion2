@@ -38,6 +38,7 @@ export function PlayerDetail({ player, mode, onBack }: { player: Player; mode: M
 				<ClassIcon gameClass={player.class} />
 				<span className="truncate font-semibold">{player.name ?? name}</span>
 				{player.own && <Badge className="h-4 px-1 text-[10px]">MOI</Badge>}
+				{player.gear !== null && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">GS {player.gear} · CP {compact(player.power ?? 0)}</span>}
 				<span className="ml-auto text-sm tabular-nums">{compact(rate(player, mode))}/s</span>
 			</div>
 			<div className="grid shrink-0 grid-cols-3 gap-2 border-b px-3 py-2 text-xs text-muted-foreground">

@@ -14,6 +14,7 @@ const COMBAT: [u8; 2] = [0x21, 0x8D];
 const MAP_CHANGE: [u8; 2] = [0x21, 0x36];
 const PARTY_ROSTER: [u8; 2] = [0x00, 0x92];
 const PARTY_MEMBERS: [[u8; 2]; 3] = [[0x0E, 0x92], [0x1A, 0x92], [0x1B, 0x92]];
+const PARTY_PROFILES: [u8; 2] = [0x02, 0x97];
 const PARENT_MARKER: [u8; 8] = [0xFF; 8];
 
 const CRITICAL: u64 = 3;
@@ -46,6 +47,12 @@ const UUID_LENGTH: usize = 36;
 const UUID_DASHES: [usize; 4] = [8, 13, 18, 23];
 const ROSTER_ENTITY_OFFSET: usize = 8;
 const ROSTER_NAME_OFFSET: usize = 8;
+const PROFILE_FIELDS: u8 = 0x1F;
+const PROFILE_CONQUEROR: u8 = 0x01;
+const PROFILE_READY: u8 = 0x02;
+const PROFILE_ORIGIN: u8 = 0x04;
+const PROFILE_SERVER: u8 = 0x08;
+const PROFILE_REBIRTH: u8 = 0x10;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
@@ -60,6 +67,7 @@ pub enum Event {
 	MapChange { map: u32, revive: bool, entry: bool },
 	PartyMember { entity: u64 },
 	PartyRoster { members: HashMap<u64, Option<String>> },
+	PartyProfiles { profiles: Vec<Profile> },
 }
 
 #[derive(Debug, PartialEq)]
@@ -82,6 +90,13 @@ pub struct Heal {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct Profile {
+	pub name: String,
+	pub gear: u32,
+	pub power: u64,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Vitals {
 	pub npc: u32,
 	pub hp: u64,
@@ -101,6 +116,7 @@ pub fn decode(body: &[u8]) -> Option<Event> {
 		COMBAT => combat(&mut reader),
 		MAP_CHANGE => map_change(&mut reader),
 		PARTY_ROSTER => party_roster(reader.rest()),
+		PARTY_PROFILES => party_profiles(&mut reader),
 		opcode if PARTY_MEMBERS.contains(&opcode) => Some(Event::PartyMember { entity: reader.varint()? }),
 		_ => None,
 	}
@@ -298,6 +314,51 @@ fn party_roster(data: &[u8]) -> Option<Event> {
 	(!members.is_empty()).then_some(Event::PartyRoster { members })
 }
 
+fn party_profiles(reader: &mut Reader) -> Option<Event> {
+	reader.skip(4)?;
+	reader.string()?;
+	reader.skip(15)?;
+	reader.bit()?;
+	reader.skip(2)?;
+	let count = reader.varint()?;
+	let profiles: Vec<Profile> = (0..count).map_while(|_| profile(reader)).filter(|profile| !profile.name.is_empty()).collect();
+	(!profiles.is_empty()).then_some(Event::PartyProfiles { profiles })
+}
+
+fn profile(reader: &mut Reader) -> Option<Profile> {
+	let mask = reader.u8()?;
+	if mask & !PROFILE_FIELDS != 0 {
+		return None;
+	}
+	reader.skip(9)?;
+	let name = reader.string()?;
+	reader.skip(8)?;
+	if mask & PROFILE_CONQUEROR != 0 {
+		reader.skip(4)?;
+	}
+	let gear = reader.u32()?;
+	if mask & PROFILE_READY != 0 {
+		reader.bit()?;
+	}
+	reader.bit()?;
+	if mask & PROFILE_ORIGIN != 0 {
+		reader.skip(2)?;
+	}
+	if mask & PROFILE_SERVER != 0 {
+		reader.skip(2)?;
+	}
+	reader.skip(1)?;
+	let power = reader.u64()?;
+	for _ in 0..reader.varint()? {
+		reader.skip(5)?;
+	}
+	if mask & PROFILE_REBIRTH != 0 {
+		reader.skip(8)?;
+	}
+	reader.skip(2)?;
+	Some(Profile { name, gear, power })
+}
+
 fn uuid(text: &[u8]) -> bool {
 	text.iter().enumerate().all(|(index, byte)| if UUID_DASHES.contains(&index) { *byte == b'-' } else { byte.is_ascii_hexdigit() })
 }
@@ -420,6 +481,12 @@ mod tests {
 	fn decodes_resurrection() {
 		assert_eq!(decode(&bytes("04 38 e9 1d 00 00 e7 79 bb 59 09 01 9d 02 d5 08 a7 67 02 00 00 00 d2 7a 02 00")), Some(Event::Resurrection { target: 3817, actor: 15591 }));
 		assert_eq!(decode(&bytes("04 38 e7 79 00 00 e7 79 bb 59 09 01 9d 02 cb 08 a7 67 01 00 00 00 d2 7a 01 00")), None);
+	}
+
+	#[test]
+	fn decodes_party_profiles() {
+		let profile = |name: &str, gear, power| Profile { name: String::from(name), gear, power };
+		assert_eq!(decode(&bytes("02 97 72 32 05 00 06 47 72 6f 75 70 65 05 cc 27 09 00 00 03 e9 03 00 00 00 00 00 00 ff 02 03 05 1e 01 ea 03 00 00 00 00 00 00 05 41 6c 70 68 61 22 00 00 00 2d 00 00 00 d6 05 00 00 17 05 d2 10 04 8f 19 01 00 00 00 00 00 00 32 00 00 00 00 00 00 00 01 01 1e 02 ed 03 00 00 00 00 00 00 05 42 72 61 76 6f 15 00 00 00 2d 00 00 00 78 05 00 00 17 05 d2 10 04 be f9 00 00 00 00 00 00 00 37 00 00 00 00 00 00 00 01 01 1e 03 f0 03 00 00 00 00 00 00 07 43 68 61 72 6c 69 65 1e 00 00 00 2d 00 00 00 06 07 00 00 17 05 d2 10 04 a1 49 01 00 00 00 00 00 00 3c 00 00 00 00 00 00 00 01 01 1e 04 f3 03 00 00 00 00 00 00 05 44 65 6c 74 61 10 00 00 00 2d 00 00 00 ab 05 00 00 01 fd 08 d2 10 04 07 18 01 00 00 00 00 00 00 44 00 00 00 00 00 00 00 01 02 00 05 f6 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 00 00 00 00 00 00 00 00 00 00 00 00 04")), Some(Event::PartyProfiles { profiles: vec![profile("Alpha", 1494, 72079), profile("Bravo", 1400, 63934), profile("Charlie", 1798, 84385), profile("Delta", 1451, 71687)] }));
 	}
 
 	#[test]

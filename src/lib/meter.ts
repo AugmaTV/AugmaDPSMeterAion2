@@ -27,6 +27,8 @@ export type Player = {
 	deaths: number;
 	revived: number;
 	resurrections: number;
+	gear: number | null;
+	power: number | null;
 	own: boolean;
 	skills: Skill[];
 	heals: Skill[];

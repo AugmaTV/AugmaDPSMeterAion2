@@ -67,6 +67,10 @@ pub struct Player {
 	pub revived: u64,
 	#[serde(default)]
 	pub resurrections: u64,
+	#[serde(default)]
+	pub gear: Option<u32>,
+	#[serde(default)]
+	pub power: Option<u64>,
 	pub own: bool,
 	pub member: bool,
 	pub skills: Vec<Skill>,
@@ -103,6 +107,7 @@ pub struct Meter {
 	own: Option<u64>,
 	party: HashSet<u64>,
 	roster: HashSet<u64>,
+	profiles: HashMap<String, (u32, u64)>,
 	party_only: bool,
 	dungeon: bool,
 	map: Option<u32>,
@@ -206,6 +211,11 @@ impl Meter {
 					}
 				}
 				self.roster = entities;
+			}
+			Event::PartyProfiles { profiles } => {
+				for profile in profiles {
+					self.profiles.insert(profile.name, (profile.gear, profile.power));
+				}
 			}
 		}
 	}
@@ -500,7 +510,8 @@ impl Meter {
 			.actors
 			.iter()
 			.filter(|(id, stats)| self.is_player(**id) && (stats.damage > 0 || stats.healing > 0 || stats.taken > 0 || stats.deaths > 0 || stats.resurrections > 0))
-			.map(|(id, stats)| Player {
+			.map(|(id, stats)| (id, stats, self.names.get(id).and_then(|name| self.profiles.get(name))))
+			.map(|(id, stats, profile)| Player {
 				id: *id,
 				name: self.names.get(id).cloned(),
 				class: self.class_of(*id),
@@ -516,6 +527,8 @@ impl Meter {
 				deaths: stats.deaths,
 				revived: stats.revived,
 				resurrections: stats.resurrections,
+				gear: profile.map(|(gear, _)| *gear),
+				power: profile.map(|(_, power)| *power),
 				own: self.own == Some(*id),
 				member: self.own == Some(*id) || encounter.members.contains(id),
 				skills: skills(&stats.skills),
@@ -627,6 +640,8 @@ fn merge(players: &mut Vec<Player>, fighter: &Player) {
 	player.deaths += fighter.deaths;
 	player.revived += fighter.revived;
 	player.resurrections += fighter.resurrections;
+	player.gear = player.gear.or(fighter.gear);
+	player.power = player.power.or(fighter.power);
 	player.own |= fighter.own;
 	player.member |= fighter.member;
 	combine(&mut player.skills, &fighter.skills);
@@ -657,6 +672,7 @@ fn skills(totals: &HashMap<u32, Totals>) -> Vec<Skill> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::packet::Profile;
 
 	fn hit(target: u64, actor: u64, skill: u32, damage: u64) -> Event {
 		Event::Hit(Hit { target, actor, skill, damage, critical: false, dot: false, drain: 0 })
@@ -818,6 +834,16 @@ mod tests {
 		meter.apply(0, Event::PartyRoster { members: HashMap::from([(2, Some(String::from("Alpha")))]) });
 		meter.apply(0, hit(900, 2, 12020000, 50));
 		assert_eq!(meter.snapshot(Status::Live).players[0].name.as_deref(), Some("Alpha"));
+	}
+
+	#[test]
+	fn attaches_profiles_by_name() {
+		let mut meter = Meter::default();
+		meter.apply(0, Event::Character { entity: 2, name: String::from("Alpha"), own: false });
+		meter.apply(0, Event::PartyProfiles { profiles: vec![Profile { name: String::from("Alpha"), gear: 1494, power: 72079 }] });
+		meter.apply(0, hit(900, 2, 12020000, 50));
+		let player = &meter.snapshot(Status::Live).players[0];
+		assert_eq!((player.gear, player.power), (Some(1494), Some(72079)));
 	}
 
 	#[test]

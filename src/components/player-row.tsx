@@ -14,6 +14,7 @@ export function PlayerRow({ player, mode, top, total, onSelect }: { player: Play
 			<span className="relative flex min-w-0 flex-1 items-center gap-1.5">
 				<span className="truncate font-medium">{player.name ?? name}</span>
 				{player.own && <Badge className="h-4 px-1 text-[10px]">MOI</Badge>}
+				{player.gear !== null && <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">GS {player.gear}</span>}
 			</span>
 			<span className="relative w-14 text-right font-semibold tabular-nums">{compact(rate(player, mode))}</span>
 			<span className="relative w-10 text-right text-muted-foreground tabular-nums">{percent(value, total)}</span>
