@@ -4,16 +4,16 @@ import { listen } from "@tauri-apps/api/event";
 import { Castle, History, Lock, LockOpen, PictureInPicture2, RotateCcw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BossBar } from "@/components/boss-bar";
-import { Board } from "@/components/board";
+import { Board, Headline } from "@/components/board";
 import { Sessions } from "@/components/sessions";
-import { clock, compact } from "@/lib/format";
-import { totalRate, type Mode, type OverlayState, type Snapshot } from "@/lib/meter";
+import { clock } from "@/lib/format";
+import type { OverlayState, Snapshot, Tab } from "@/lib/meter";
 import { cn } from "@/lib/utils";
 
 export default function App() {
 	const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
 	const [page, setPage] = useState<"live" | "history">("live");
-	const [mode, setMode] = useState<Mode>("damage");
+	const [mode, setMode] = useState<Tab>("damage");
 	const [overlay, setOverlay] = useState<OverlayState>({ open: false, locked: false });
 	const [partyOnly, setPartyOnly] = useState(true);
 	const [dungeon, setDungeon] = useState(false);
@@ -41,7 +41,9 @@ export default function App() {
 				<span className={cn("size-2 rounded-full", snapshot?.status === "live" ? "bg-emerald-400" : "bg-muted-foreground")} />
 				<span className="font-semibold">Augma DPS</span>
 				<span className="text-muted-foreground tabular-nums">{clock(snapshot?.duration ?? 0)}</span>
-				<span className="ml-auto font-semibold tabular-nums lg:invisible">{compact(totalRate(snapshot?.players ?? [], mode))}/s</span>
+				<span className="ml-auto font-semibold tabular-nums xl:invisible">
+					<Headline players={snapshot?.players ?? []} tab={mode} />
+				</span>
 				<Button variant={partyOnly ? "secondary" : "ghost"} size="icon-sm" title={partyOnly ? "Afficher tous les joueurs" : "Afficher seulement moi et mon groupe"} onClick={() => invoke("set_party_only", { enabled: !partyOnly }).then(() => setPartyOnly(!partyOnly))}>
 					<Users />
 				</Button>
@@ -56,9 +58,11 @@ export default function App() {
 						{overlay.locked ? <Lock /> : <LockOpen />}
 					</Button>
 				)}
-				<Button variant={overlay.open ? "secondary" : "ghost"} size="icon-sm" title="Ouvrir un overlay sur l'onglet actif" className="lg:hidden" onClick={() => invoke("open_overlay", { mode })}>
-					<PictureInPicture2 />
-				</Button>
+				{mode !== "deaths" && (
+					<Button variant={overlay.open ? "secondary" : "ghost"} size="icon-sm" title="Ouvrir un overlay sur l'onglet actif" className="xl:hidden" onClick={() => invoke("open_overlay", { mode })}>
+						<PictureInPicture2 />
+					</Button>
+				)}
 				<Button variant="ghost" size="icon-sm" title="Réinitialiser" onClick={() => invoke("reset")}>
 					<RotateCcw />
 				</Button>

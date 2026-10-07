@@ -61,6 +61,12 @@ pub struct Player {
 	pub taken: u64,
 	pub dtps: u64,
 	pub taken_hits: u64,
+	#[serde(default)]
+	pub deaths: u64,
+	#[serde(default)]
+	pub revived: u64,
+	#[serde(default)]
+	pub resurrections: u64,
 	pub own: bool,
 	pub member: bool,
 	pub skills: Vec<Skill>,
@@ -92,6 +98,7 @@ pub struct Meter {
 	classes: HashMap<u64, [u32; CLASS_COUNT]>,
 	spawned: HashSet<u64>,
 	owners: HashMap<u64, u64>,
+	fallen: HashMap<u64, Option<u64>>,
 	vitals: HashMap<u64, Vitals>,
 	own: Option<u64>,
 	party: HashSet<u64>,
@@ -137,6 +144,9 @@ struct Stats {
 	healing: u64,
 	taken: u64,
 	taken_hits: u64,
+	deaths: u64,
+	revived: u64,
+	resurrections: u64,
 	skills: HashMap<u32, Totals>,
 	heals: HashMap<u32, Totals>,
 	sources: HashMap<u32, Totals>,
@@ -154,6 +164,14 @@ impl Meter {
 		match event {
 			Event::Hit(hit) => self.hit(micros, hit),
 			Event::Heal(heal) => self.heal(micros, heal),
+			Event::Resurrection { target, actor } => {
+				let actor = self.owner(actor);
+				if self.is_player(actor) {
+					if let Some(resurrector) = self.fallen.get_mut(&target) {
+						resurrector.get_or_insert(actor);
+					}
+				}
+			}
 			Event::Character { entity, name, own } => {
 				if own {
 					self.own = Some(entity);
@@ -202,6 +220,7 @@ impl Meter {
 		self.classes.clear();
 		self.spawned.clear();
 		self.owners.clear();
+		self.fallen.clear();
 		self.vitals.clear();
 		self.own = None;
 		self.party.clear();
@@ -353,7 +372,10 @@ impl Meter {
 	}
 
 	fn health(&mut self, micros: u64, entity: u64, hp: u64) {
+		let player = self.is_player(entity);
 		let vitals = self.vitals.entry(entity).or_default();
+		let died = player && hp == 0 && !vitals.dead;
+		let revived = player && hp > 0 && vitals.dead;
 		vitals.hp = hp;
 		vitals.highest = vitals.highest.max(hp);
 		vitals.first.get_or_insert(hp);
@@ -364,6 +386,32 @@ impl Meter {
 		let reset = vitals.max == Some(hp) && vitals.combat_seen && !vitals.in_combat;
 		if hp == 0 || reset {
 			self.finish(micros, entity);
+		}
+		if died {
+			self.die(micros, entity);
+		}
+		if revived {
+			self.revive(entity);
+		}
+	}
+
+	fn die(&mut self, micros: u64, entity: u64) {
+		self.fallen.insert(entity, None);
+		if !self.active(micros) {
+			return;
+		}
+		if let Some(encounter) = &mut self.encounter {
+			encounter.actors.entry(entity).or_default().deaths += 1;
+		}
+	}
+
+	fn revive(&mut self, entity: u64) {
+		let Some(resurrector) = self.fallen.remove(&entity).flatten() else {
+			return;
+		};
+		if let Some(encounter) = &mut self.encounter {
+			encounter.actors.entry(entity).or_default().revived += 1;
+			encounter.actors.entry(resurrector).or_default().resurrections += 1;
 		}
 	}
 
@@ -451,7 +499,7 @@ impl Meter {
 		let mut players: Vec<Player> = encounter
 			.actors
 			.iter()
-			.filter(|(id, stats)| self.is_player(**id) && (stats.damage > 0 || stats.healing > 0 || stats.taken > 0))
+			.filter(|(id, stats)| self.is_player(**id) && (stats.damage > 0 || stats.healing > 0 || stats.taken > 0 || stats.deaths > 0 || stats.resurrections > 0))
 			.map(|(id, stats)| Player {
 				id: *id,
 				name: self.names.get(id).cloned(),
@@ -465,6 +513,9 @@ impl Meter {
 				taken: stats.taken,
 				dtps: per_second(stats.taken, elapsed),
 				taken_hits: stats.taken_hits,
+				deaths: stats.deaths,
+				revived: stats.revived,
+				resurrections: stats.resurrections,
 				own: self.own == Some(*id),
 				member: self.own == Some(*id) || encounter.members.contains(id),
 				skills: skills(&stats.skills),
@@ -573,6 +624,9 @@ fn merge(players: &mut Vec<Player>, fighter: &Player) {
 	player.healing += fighter.healing;
 	player.taken += fighter.taken;
 	player.taken_hits += fighter.taken_hits;
+	player.deaths += fighter.deaths;
+	player.revived += fighter.revived;
+	player.resurrections += fighter.resurrections;
 	player.own |= fighter.own;
 	player.member |= fighter.member;
 	combine(&mut player.skills, &fighter.skills);
@@ -830,6 +884,22 @@ mod tests {
 		assert_eq!((closed.len(), closed[0].len(), meter.session().len()), (1, 2, 1));
 		meter.reset();
 		assert_eq!((meter.closed().len(), meter.session().len()), (1, 0));
+	}
+
+	#[test]
+	fn counts_deaths_and_cleric_resurrections() {
+		let mut meter = Meter::default();
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(0, hit(900, 2, 17010000, 100));
+		meter.apply(1_000_000, Event::Health { entity: 1, hp: 0 });
+		meter.apply(1_000_000, Event::Health { entity: 1, hp: 0 });
+		meter.apply(2_000_000, Event::Resurrection { target: 1, actor: 2 });
+		meter.apply(3_000_000, Event::Health { entity: 1, hp: 500 });
+		meter.apply(4_000_000, Event::Health { entity: 1, hp: 0 });
+		meter.apply(5_000_000, Event::Health { entity: 1, hp: 800 });
+		let snapshot = meter.snapshot(Status::Live);
+		let player = |id| snapshot.players.iter().find(|player| player.id == id).unwrap();
+		assert_eq!((player(1).deaths, player(1).revived, player(2).resurrections), (2, 1, 1));
 	}
 
 	#[test]

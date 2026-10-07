@@ -3,10 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronLeft, Lock, LockOpen, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BossBar } from "@/components/boss-bar";
-import { Board } from "@/components/board";
+import { Board, Headline } from "@/components/board";
 import { clock, compact, date } from "@/lib/format";
 import { npcName } from "@/lib/game-data";
-import { totalRate, type Mode, type SessionSummary, type SessionView } from "@/lib/meter";
+import type { SessionSummary, SessionView, Tab } from "@/lib/meter";
 
 function title(session: SessionSummary) {
 	return session.name ?? npcName(session.boss) ?? "Monde ouvert";
@@ -93,7 +93,7 @@ export function Sessions({ onBack }: { onBack: () => void }) {
 function SessionPage({ session, onBack }: { session: SessionSummary; onBack: () => void }) {
 	const [fight, setFight] = useState<number | null>(null);
 	const [view, setView] = useState<SessionView | null>(null);
-	const [mode, setMode] = useState<Mode>("damage");
+	const [mode, setMode] = useState<Tab>("damage");
 
 	useEffect(() => {
 		invoke<SessionView | null>("load_session", { id: session.id, fight }).then(setView);
@@ -107,7 +107,9 @@ function SessionPage({ session, onBack }: { session: SessionSummary; onBack: () 
 				</Button>
 				<span className="truncate font-semibold">{title(session)}</span>
 				<span className="text-muted-foreground tabular-nums">{clock(view?.snapshot.duration ?? 0)}</span>
-				<span className="ml-auto font-semibold tabular-nums lg:invisible">{compact(totalRate(view?.snapshot.players ?? [], mode))}/s</span>
+				<span className="ml-auto font-semibold tabular-nums xl:invisible">
+					<Headline players={view?.snapshot.players ?? []} tab={mode} />
+				</span>
 			</header>
 			<div className="flex shrink-0 gap-1 overflow-x-auto border-b px-2 py-1.5">
 				<Button variant={fight === null ? "secondary" : "ghost"} size="xs" onClick={() => setFight(null)}>

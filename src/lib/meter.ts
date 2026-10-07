@@ -2,6 +2,8 @@ export type Status = "unavailable" | "waiting" | "live";
 
 export type Mode = "damage" | "healing" | "taken";
 
+export type Tab = Mode | "deaths";
+
 export type Skill = {
 	id: number;
 	amount: number;
@@ -22,6 +24,9 @@ export type Player = {
 	taken: number;
 	dtps: number;
 	takenHits: number;
+	deaths: number;
+	revived: number;
+	resurrections: number;
 	own: boolean;
 	skills: Skill[];
 	heals: Skill[];
@@ -69,10 +74,13 @@ export type SessionView = {
 
 export const MODES: Mode[] = ["damage", "healing", "taken"];
 
-export const TITLES: Record<Mode, string> = {
+export const TABS: Tab[] = [...MODES, "deaths"];
+
+export const TITLES: Record<Tab, string> = {
 	damage: "Dégâts",
 	healing: "Soins",
 	taken: "Subis",
+	deaths: "Morts",
 };
 
 const AMOUNTS: Record<Mode, (player: Player) => number> = {

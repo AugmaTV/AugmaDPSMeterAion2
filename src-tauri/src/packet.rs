@@ -31,6 +31,7 @@ const SELF_HEALS: [u32; 18] = [
 ];
 const SPIRIT_HEALS: [u32; 2] = [16_190_000, 16_770_000];
 const NPC_HEALS: [u32; 1] = [1_801_892];
+const RESURRECTION: u32 = 17_390_000;
 const HOT_HEALS: [u32; 4] = [12_350_000, 16_190_000, 17_090_000, 18_120_000];
 const GROUP_HOTS: [u32; 2] = [17_090_000, 18_120_000];
 const KIND_REMAINING: u8 = 0x02;
@@ -50,6 +51,7 @@ const ROSTER_NAME_OFFSET: usize = 8;
 pub enum Event {
 	Hit(Hit),
 	Heal(Heal),
+	Resurrection { target: u64, actor: u64 },
 	Character { entity: u64, name: String, own: bool },
 	Spawn { entity: u64, owner: Option<u64>, vitals: Option<Vitals> },
 	Health { entity: u64, hp: u64 },
@@ -117,6 +119,9 @@ fn record(reader: &mut Reader) -> Option<Event> {
 	reader.skip(1)?;
 	let kind = reader.varint()?;
 	let layout = switch & 0x0F;
+	if family(skill) == RESURRECTION {
+		return (actor != target).then_some(Event::Resurrection { target, actor });
+	}
 	if layout & 0x04 == 0 || skill == 0 {
 		return None;
 	}
@@ -409,6 +414,12 @@ mod tests {
 		assert_eq!(decode(&bytes("00 8d dd 10 03 01 01 26 0f 00 00 01 00 7d 61 00 00 00 00 00 00")), Some(Event::Health { entity: 2141, hp: 24957 }));
 		assert_eq!(decode(&bytes("00 8d b7 32 01 01 03 28 17 02 00")), None);
 		assert_eq!(decode(&bytes("00 8d f9 22 02 02 00 b8 5f 00 00 00 00 00 00 07 c8 68 00 00 00 00 00 00")), Some(Event::Health { entity: 4473, hp: 24504 }));
+	}
+
+	#[test]
+	fn decodes_resurrection() {
+		assert_eq!(decode(&bytes("04 38 e9 1d 00 00 e7 79 bb 59 09 01 9d 02 d5 08 a7 67 02 00 00 00 d2 7a 02 00")), Some(Event::Resurrection { target: 3817, actor: 15591 }));
+		assert_eq!(decode(&bytes("04 38 e7 79 00 00 e7 79 bb 59 09 01 9d 02 cb 08 a7 67 01 00 00 00 d2 7a 01 00")), None);
 	}
 
 	#[test]
