@@ -8,14 +8,8 @@ import { BossBar } from "@/components/boss-bar";
 import { ClassIcon } from "@/components/class-icon";
 import { CLASSES } from "@/lib/classes";
 import { clock, compact, percent } from "@/lib/format";
-import { amount, rate, ranking, total, type Mode, type OverlayState, type Snapshot } from "@/lib/meter";
+import { amount, rate, ranking, total, totalRate, TITLES, type Mode, type OverlayState, type Snapshot } from "@/lib/meter";
 import { cn } from "@/lib/utils";
-
-const TITLES: Record<Mode, string> = {
-	damage: "Dégâts",
-	healing: "Soins",
-	taken: "Subis",
-};
 
 export function Overlay({ mode }: { mode: Mode }) {
 	const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -34,7 +28,6 @@ export function Overlay({ mode }: { mode: Mode }) {
 
 	const players = ranking(snapshot?.players ?? [], mode);
 	const top = players[0] ? amount(players[0], mode) : 1;
-	const totalRate = players.reduce((sum, player) => sum + rate(player, mode), 0);
 
 	return (
 		<main className={cn("flex h-screen flex-col overflow-hidden rounded-lg border bg-neutral-950/75 text-neutral-100 select-none", locked ? "border-white/10" : "border-sky-400/70")}>
@@ -42,7 +35,7 @@ export function Overlay({ mode }: { mode: Mode }) {
 				<span data-tauri-drag-region className={cn("size-2 rounded-full", snapshot?.status === "live" ? "bg-emerald-400" : "bg-neutral-500")} />
 				<span data-tauri-drag-region className="font-semibold">{TITLES[mode]}</span>
 				<span data-tauri-drag-region className="text-white/60 tabular-nums">{clock(snapshot?.duration ?? 0)}</span>
-				<span data-tauri-drag-region className="ml-auto font-semibold tabular-nums">{compact(totalRate)}/s</span>
+				<span data-tauri-drag-region className="ml-auto font-semibold tabular-nums">{compact(totalRate(players, mode))}/s</span>
 				{!locked && (
 					<>
 						<Button variant="ghost" size="icon-xs" title="Verrouiller (Ctrl+Shift+L)" onClick={() => invoke("lock_overlay", { locked: true })}>

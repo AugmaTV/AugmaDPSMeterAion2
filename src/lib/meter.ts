@@ -51,6 +51,14 @@ export type OverlayState = {
 	locked: boolean;
 };
 
+export const MODES: Mode[] = ["damage", "healing", "taken"];
+
+export const TITLES: Record<Mode, string> = {
+	damage: "Dégâts",
+	healing: "Soins",
+	taken: "Subis",
+};
+
 const AMOUNTS: Record<Mode, (player: Player) => number> = {
 	damage: (player) => player.damage,
 	healing: (player) => player.healing,
@@ -79,6 +87,10 @@ export function rate(player: Player, mode: Mode) {
 
 export function total(snapshot: Snapshot, mode: Mode) {
 	return TOTALS[mode](snapshot);
+}
+
+export function totalRate(players: Player[], mode: Mode) {
+	return players.reduce((sum, player) => sum + rate(player, mode), 0);
 }
 
 export function ranking(players: Player[], mode: Mode) {
