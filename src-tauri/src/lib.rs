@@ -8,6 +8,7 @@ pub mod packet;
 pub mod pcap;
 pub mod pktmon;
 mod reader;
+mod sessions;
 pub mod stream;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +25,7 @@ use tauri_plugin_window_state::StateFlags;
 use crate::capture::Source;
 use crate::engine::Engine;
 use crate::meter::{Meter, Status};
+use crate::sessions::{Summary, View};
 
 const WINDOW: &str = "main";
 const SPLASH: &str = "splash";
@@ -35,6 +37,7 @@ const RESCAN: Duration = Duration::from_secs(5);
 const RETRY: Duration = Duration::from_secs(3);
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(8);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
 static RESET: AtomicBool = AtomicBool::new(false);
 static LOCKED: AtomicBool = AtomicBool::new(false);
@@ -114,6 +117,26 @@ fn set_dungeon(enabled: bool) {
 	DUNGEON.store(enabled, Ordering::Relaxed);
 }
 
+#[command]
+fn list_sessions(app: AppHandle) -> Result<Vec<Summary>> {
+	Ok(sessions::list(&sessions::directory(&app)?))
+}
+
+#[command]
+fn load_session(app: AppHandle, id: u64, fight: Option<usize>) -> Option<View> {
+	sessions::view(&sessions::directory(&app).ok()?, id, fight, PARTY_ONLY.load(Ordering::Relaxed))
+}
+
+#[command]
+fn rename_session(app: AppHandle, id: u64, name: String) -> Result<()> {
+	Ok(sessions::rename(&sessions::directory(&app)?, id, Some(name.trim().to_string()).filter(|name| !name.is_empty()))?)
+}
+
+#[command]
+fn delete_session(app: AppHandle, id: u64) -> Result<()> {
+	Ok(sessions::delete(&sessions::directory(&app)?, id)?)
+}
+
 pub fn run() {
 	Builder::default()
 		.plugin(tauri_plugin_single_instance::init(|app, _, _| {
@@ -133,7 +156,7 @@ pub fn run() {
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon])
+		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, delete_session])
 		.on_window_event(|window, event| {
 			if !matches!(event, WindowEvent::Destroyed) {
 				return;
@@ -186,9 +209,12 @@ fn capture(app: AppHandle) {
 				}
 			}
 		};
+		let directory = sessions::directory(&app);
 		let mut engine = Engine::default();
 		let mut scanned = Instant::now();
 		let mut emitted = Instant::now();
+		let mut saved = Instant::now();
+		let mut stored = None;
 		loop {
 			engine.set_party_only(PARTY_ONLY.load(Ordering::Relaxed));
 			engine.set_dungeon(DUNGEON.load(Ordering::Relaxed));
@@ -201,6 +227,21 @@ fn capture(app: AppHandle) {
 			}
 			if RESET.swap(false, Ordering::Relaxed) {
 				engine.reset();
+			}
+			let closed = engine.closed();
+			if let Ok(directory) = &directory {
+				for fights in closed {
+					let _ = sessions::save(directory, &fights);
+				}
+				if saved.elapsed() >= SAVE_INTERVAL {
+					let fights = engine.session();
+					let state = fights.first().zip(fights.last()).map(|(first, last)| (first.start, last.last, fights.len()));
+					if state != stored {
+						let _ = sessions::save(directory, &fights);
+						stored = state;
+					}
+					saved = Instant::now();
+				}
 			}
 			if emitted.elapsed() >= REFRESH {
 				let _ = app.emit("snapshot", engine.snapshot(now()));

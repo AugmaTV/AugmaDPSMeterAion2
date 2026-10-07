@@ -1,8 +1,9 @@
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
+use std::mem;
 use std::ops::Range;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::packet::{family, Event, Heal, Hit, Vitals as SpawnVitals};
 
@@ -35,7 +36,7 @@ pub struct Snapshot {
 	pub players: Vec<Player>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Boss {
 	pub npc: Option<u32>,
@@ -45,7 +46,7 @@ pub struct Boss {
 	pub dead: bool,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Player {
 	pub id: u64,
@@ -61,20 +62,28 @@ pub struct Player {
 	pub dtps: u64,
 	pub taken_hits: u64,
 	pub own: bool,
-	#[serde(skip)]
 	pub member: bool,
 	pub skills: Vec<Skill>,
 	pub heals: Vec<Skill>,
 	pub sources: Vec<Skill>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
 	pub id: u32,
 	pub amount: u64,
 	pub hits: u64,
 	pub crits: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Fight {
+	pub start: u64,
+	pub last: u64,
+	pub boss: Option<Boss>,
+	pub players: Vec<Player>,
 }
 
 #[derive(Default)]
@@ -92,7 +101,8 @@ pub struct Meter {
 	map: Option<u32>,
 	zone: u32,
 	encounter: Option<Encounter>,
-	history: Vec<(u64, Vec<Player>)>,
+	history: Vec<Fight>,
+	closed: Vec<Vec<Fight>>,
 }
 
 #[derive(Default)]
@@ -116,7 +126,7 @@ struct Encounter {
 	targets: HashMap<u64, u64>,
 	actors: HashMap<u64, Stats>,
 	members: HashSet<u64>,
-	frozen: Option<(Vec<Player>, Option<Boss>)>,
+	frozen: Option<Fight>,
 }
 
 #[derive(Default)]
@@ -156,11 +166,11 @@ impl Meter {
 			Event::Health { entity, hp } => self.health(micros, entity, hp),
 			Event::Despawn { entity, dead } => self.despawn(micros, entity, dead),
 			Event::Combat { entity, active } => self.combat(micros, entity, active),
-			Event::MapChange { map, revive } => {
-				if self.map != Some(map) || (!revive && !self.boss_in_combat(None)) {
+			Event::MapChange { map, revive, entry } => {
+				if self.map != Some(map) || entry || (!revive && !self.boss_in_combat(None)) {
 					self.end(micros);
 				}
-				if self.map != Some(map) {
+				if self.map != Some(map) || entry {
 					self.zone += 1;
 				}
 				self.map = Some(map);
@@ -184,7 +194,7 @@ impl Meter {
 
 	pub fn reconnect(&mut self, micros: u64) {
 		self.end(micros);
-		let frozen = self.encounter.as_ref().map(|encounter| (self.players(encounter), self.boss(encounter)));
+		let frozen = self.encounter.as_ref().map(|encounter| self.fight(encounter));
 		if let (Some(encounter), Some(frozen)) = (&mut self.encounter, frozen) {
 			encounter.frozen.get_or_insert(frozen);
 		}
@@ -199,8 +209,20 @@ impl Meter {
 	}
 
 	pub fn reset(&mut self) {
-		self.encounter = None;
-		self.history.clear();
+		if let Some(encounter) = self.encounter.take() {
+			self.history.push(self.fight(&encounter));
+		}
+		self.close();
+	}
+
+	pub fn closed(&mut self) -> Vec<Vec<Fight>> {
+		mem::take(&mut self.closed)
+	}
+
+	pub fn session(&self) -> Vec<Fight> {
+		let mut fights = self.history.clone();
+		fights.extend(self.encounter.as_ref().map(|encounter| self.fight(encounter)));
+		fights
 	}
 
 	pub fn set_party_only(&mut self, enabled: bool) {
@@ -212,42 +234,13 @@ impl Meter {
 	}
 
 	pub fn snapshot(&self, status: Status) -> Snapshot {
-		let Some(encounter) = &self.encounter else {
-			return Snapshot { status, duration: 0, total: 0, total_healing: 0, total_taken: 0, boss: None, players: Vec::new() };
-		};
-		let (mut players, boss) = match &encounter.frozen {
-			Some((players, boss)) => (players.clone(), boss.clone()),
-			None => (self.players(encounter), self.boss(encounter)),
-		};
-		let start = match self.history.first() {
-			Some((start, _)) if self.dungeon => *start,
-			_ => encounter.start,
-		};
+		let current = self.encounter.as_ref().map(|encounter| self.fight(encounter));
+		let mut fights: Vec<&Fight> = Vec::new();
 		if self.dungeon {
-			for (_, fighters) in &self.history {
-				for fighter in fighters {
-					merge(&mut players, fighter);
-				}
-			}
-			for player in &mut players {
-				player.dps = per_second(player.damage, encounter.last - start);
-				player.hps = per_second(player.healing, encounter.last - start);
-				player.dtps = per_second(player.taken, encounter.last - start);
-			}
-			players.sort_by_key(|player| Reverse(player.damage));
+			fights.extend(&self.history);
 		}
-		if self.party_only {
-			players.retain(|player| player.member);
-		}
-		Snapshot {
-			status,
-			duration: (encounter.last - start) / 1000,
-			total: players.iter().map(|player| player.damage).sum(),
-			total_healing: players.iter().map(|player| player.healing).sum(),
-			total_taken: players.iter().map(|player| player.taken).sum(),
-			boss,
-			players,
-		}
+		fights.extend(&current);
+		summarize(status, &fights, self.party_only)
 	}
 
 	fn hit(&mut self, micros: u64, hit: Hit) {
@@ -403,15 +396,23 @@ impl Meter {
 		let Some(encounter) = self.encounter.take() else {
 			return;
 		};
+		self.history.push(self.fight(&encounter));
 		if encounter.zone != self.zone {
-			self.history.clear();
-			return;
+			self.close();
 		}
-		let players = match encounter.frozen {
-			Some((players, _)) => players,
-			None => self.players(&encounter),
-		};
-		self.history.push((encounter.start, players));
+	}
+
+	fn close(&mut self) {
+		if !self.history.is_empty() {
+			self.closed.push(mem::take(&mut self.history));
+		}
+	}
+
+	fn fight(&self, encounter: &Encounter) -> Fight {
+		match &encounter.frozen {
+			Some(frozen) => frozen.clone(),
+			None => Fight { start: encounter.start, last: encounter.last, boss: self.boss(encounter), players: self.players(encounter) },
+		}
 	}
 
 	fn join(&mut self, entity: u64) {
@@ -522,6 +523,37 @@ fn base_skill(skill: u32) -> u32 {
 	}
 }
 
+pub fn summarize(status: Status, fights: &[&Fight], party_only: bool) -> Snapshot {
+	let (Some(first), Some(last)) = (fights.first(), fights.last()) else {
+		return Snapshot { status, duration: 0, total: 0, total_healing: 0, total_taken: 0, boss: None, players: Vec::new() };
+	};
+	let elapsed = last.last - first.start;
+	let mut players = Vec::new();
+	for fight in fights.iter().rev() {
+		for player in &fight.players {
+			merge(&mut players, player);
+		}
+	}
+	for player in &mut players {
+		player.dps = per_second(player.damage, elapsed);
+		player.hps = per_second(player.healing, elapsed);
+		player.dtps = per_second(player.taken, elapsed);
+	}
+	players.sort_by_key(|player| Reverse(player.damage));
+	if party_only {
+		players.retain(|player| player.member);
+	}
+	Snapshot {
+		status,
+		duration: elapsed / 1000,
+		total: players.iter().map(|player| player.damage).sum(),
+		total_healing: players.iter().map(|player| player.healing).sum(),
+		total_taken: players.iter().map(|player| player.taken).sum(),
+		boss: last.boss.clone(),
+		players,
+	}
+}
+
 fn per_second(amount: u64, micros: u64) -> u64 {
 	(amount as f64 / (micros as f64 / 1_000_000.0).max(1.0)) as u64
 }
@@ -613,11 +645,11 @@ mod tests {
 	#[test]
 	fn keeps_boss_encounter_through_player_revive() {
 		let mut meter = Meter::default();
-		meter.apply(0, Event::MapChange { map: 600082, revive: false });
+		meter.apply(0, Event::MapChange { map: 600082, revive: false, entry: true });
 		meter.apply(0, boss(900, 5_000_000));
 		meter.apply(1_000_000, hit(900, 1, 11020000, 100));
 		meter.apply(1_000_000, Event::Combat { entity: 900, active: true });
-		meter.apply(5_000_000, Event::MapChange { map: 600082, revive: true });
+		meter.apply(5_000_000, Event::MapChange { map: 600082, revive: true, entry: false });
 		meter.apply(IDLE_MICROS * 4, hit(900, 1, 11020000, 40));
 		assert_eq!(meter.snapshot(Status::Live).total, 140);
 	}
@@ -748,9 +780,9 @@ mod tests {
 	fn accumulates_whole_dungeon() {
 		let mut meter = Meter::default();
 		meter.set_dungeon(true);
-		meter.apply(0, Event::MapChange { map: 600082, revive: false });
+		meter.apply(0, Event::MapChange { map: 600082, revive: false, entry: true });
 		meter.apply(0, hit(900, 1, 11020000, 100));
-		meter.apply(1_000_000, Event::MapChange { map: 600082, revive: false });
+		meter.apply(1_000_000, Event::MapChange { map: 600082, revive: false, entry: false });
 		meter.apply(IDLE_MICROS * 2, hit(901, 1, 11020000, 40));
 		let snapshot = meter.snapshot(Status::Live);
 		assert_eq!((snapshot.total, snapshot.duration, snapshot.players[0].dps), (140, IDLE_MICROS * 2 / 1000, 4));
@@ -763,12 +795,37 @@ mod tests {
 	fn restarts_dungeon_total_on_new_map() {
 		let mut meter = Meter::default();
 		meter.set_dungeon(true);
-		meter.apply(0, Event::MapChange { map: 600082, revive: false });
+		meter.apply(0, Event::MapChange { map: 600082, revive: false, entry: true });
 		meter.apply(0, hit(900, 1, 11020000, 100));
-		meter.apply(1_000_000, Event::MapChange { map: 100001, revive: false });
+		meter.apply(1_000_000, Event::MapChange { map: 100001, revive: false, entry: true });
 		assert_eq!(meter.snapshot(Status::Live).total, 100);
 		meter.apply(2_000_000, hit(901, 1, 11020000, 40));
 		assert_eq!(meter.snapshot(Status::Live).total, 40);
+	}
+
+	#[test]
+	fn restarts_dungeon_total_on_reentry() {
+		let mut meter = Meter::default();
+		meter.set_dungeon(true);
+		meter.apply(0, Event::MapChange { map: 600082, revive: false, entry: true });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, Event::MapChange { map: 600082, revive: false, entry: true });
+		meter.apply(2_000_000, hit(901, 1, 11020000, 40));
+		assert_eq!(meter.snapshot(Status::Live).total, 40);
+	}
+
+	#[test]
+	fn closes_sessions_on_new_zone_and_reset() {
+		let mut meter = Meter::default();
+		meter.apply(0, Event::MapChange { map: 600082, revive: false, entry: true });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(IDLE_MICROS * 2, hit(901, 1, 11020000, 40));
+		meter.apply(IDLE_MICROS * 3, Event::MapChange { map: 100001, revive: false, entry: true });
+		meter.apply(IDLE_MICROS * 4, hit(902, 1, 11020000, 10));
+		let closed = meter.closed();
+		assert_eq!((closed.len(), closed[0].len(), meter.session().len()), (1, 2, 1));
+		meter.reset();
+		assert_eq!((meter.closed().len(), meter.session().len()), (1, 0));
 	}
 
 	#[test]

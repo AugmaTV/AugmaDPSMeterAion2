@@ -13,6 +13,10 @@ export function clock(millis: number) {
 	return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+export function date(millis: number) {
+	return new Date(millis).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+}
+
 export function percent(part: number, total: number) {
 	return `${total ? Math.round((part / total) * 100) : 0}%`;
 }

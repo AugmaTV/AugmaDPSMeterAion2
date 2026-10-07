@@ -1,5 +1,5 @@
 use crate::frame::Framer;
-use crate::meter::{Meter, Snapshot, Status};
+use crate::meter::{Fight, Meter, Snapshot, Status};
 use crate::net;
 use crate::packet;
 use crate::stream::{Delivery, Stream};
@@ -45,6 +45,14 @@ impl Engine {
 
 	pub fn set_dungeon(&mut self, enabled: bool) {
 		self.meter.set_dungeon(enabled);
+	}
+
+	pub fn closed(&mut self) -> Vec<Vec<Fight>> {
+		self.meter.closed()
+	}
+
+	pub fn session(&self) -> Vec<Fight> {
+		self.meter.session()
 	}
 
 	pub fn snapshot(&self, micros: u64) -> Snapshot {

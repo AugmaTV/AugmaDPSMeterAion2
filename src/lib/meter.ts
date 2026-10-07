@@ -51,6 +51,21 @@ export type OverlayState = {
 	locked: boolean;
 };
 
+export type SessionSummary = {
+	id: number;
+	name: string | null;
+	boss: number | null;
+	start: number;
+	duration: number;
+	fights: number;
+	dps: number;
+};
+
+export type SessionView = {
+	fights: { boss: number | null; duration: number }[];
+	snapshot: Snapshot;
+};
+
 export const MODES: Mode[] = ["damage", "healing", "taken"];
 
 export const TITLES: Record<Mode, string> = {

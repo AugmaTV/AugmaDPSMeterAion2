@@ -21,6 +21,7 @@ const PLAIN_SWITCH: u64 = 0x04;
 const DRAIN_FLAG: u64 = 0x04;
 const DEAD_REASON: u8 = 3;
 const REVIVE_REASON: u8 = 4;
+const ENTRY_REASON: u8 = 0;
 const HEALTH_STAT: u8 = 0;
 const NPC_CODES: RangeInclusive<u32> = 2_000_000..=2_999_999;
 const SPAWN_MASKS: [usize; 2] = [4, 2];
@@ -54,7 +55,7 @@ pub enum Event {
 	Health { entity: u64, hp: u64 },
 	Despawn { entity: u64, dead: bool },
 	Combat { entity: u64, active: bool },
-	MapChange { map: u32, revive: bool },
+	MapChange { map: u32, revive: bool, entry: bool },
 	PartyMember { entity: u64 },
 	PartyRoster { members: HashMap<u64, Option<String>> },
 }
@@ -274,7 +275,8 @@ fn map_change(reader: &mut Reader) -> Option<Event> {
 	reader.skip(4)?;
 	let map = reader.u32()?;
 	reader.skip(24)?;
-	Some(Event::MapChange { map, revive: reader.u8()? == REVIVE_REASON })
+	let reason = reader.u8()?;
+	Some(Event::MapChange { map, revive: reason == REVIVE_REASON, entry: reason == ENTRY_REASON })
 }
 
 fn party_roster(data: &[u8]) -> Option<Event> {
