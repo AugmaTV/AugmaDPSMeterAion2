@@ -166,12 +166,16 @@ impl Meter {
 				self.map = Some(map);
 			}
 			Event::PartyMember { entity } => self.join(entity),
-			Event::PartyRoster { entities } => {
+			Event::PartyRoster { members } => {
+				let entities: HashSet<u64> = members.keys().copied().collect();
 				for left in self.roster.difference(&entities) {
 					self.party.remove(left);
 				}
-				for entity in &entities {
-					self.join(*entity);
+				for (entity, name) in members {
+					self.join(entity);
+					if let Some(name) = name {
+						self.names.insert(entity, name);
+					}
 				}
 				self.roster = entities;
 			}
@@ -700,10 +704,10 @@ mod tests {
 		let mut meter = Meter::default();
 		meter.set_party_only(true);
 		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
-		meter.apply(0, Event::PartyRoster { entities: HashSet::from([1, 2]) });
+		meter.apply(0, Event::PartyRoster { members: HashMap::from([(1, None), (2, None)]) });
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(0, hit(900, 2, 12020000, 50));
-		meter.apply(1_000_000, Event::PartyRoster { entities: HashSet::from([1]) });
+		meter.apply(1_000_000, Event::PartyRoster { members: HashMap::from([(1, None)]) });
 		assert_eq!(meter.snapshot(Status::Live).total, 150);
 	}
 
@@ -713,13 +717,21 @@ mod tests {
 		meter.set_party_only(true);
 		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
 		meter.apply(0, Event::PartyMember { entity: 4 });
-		meter.apply(0, Event::PartyRoster { entities: HashSet::from([1, 2, 3]) });
-		meter.apply(0, Event::PartyRoster { entities: HashSet::from([1, 3]) });
+		meter.apply(0, Event::PartyRoster { members: HashMap::from([(1, None), (2, None), (3, None)]) });
+		meter.apply(0, Event::PartyRoster { members: HashMap::from([(1, None), (3, None)]) });
 		for actor in 1..=5 {
 			meter.apply(0, hit(900, actor, 11020000, 10));
 		}
 		let players: HashSet<u64> = meter.snapshot(Status::Live).players.iter().map(|player| player.id).collect();
 		assert_eq!(players, HashSet::from([1, 3, 4]));
+	}
+
+	#[test]
+	fn names_party_members_from_roster() {
+		let mut meter = Meter::default();
+		meter.apply(0, Event::PartyRoster { members: HashMap::from([(2, Some(String::from("Alpha")))]) });
+		meter.apply(0, hit(900, 2, 12020000, 50));
+		assert_eq!(meter.snapshot(Status::Live).players[0].name.as_deref(), Some("Alpha"));
 	}
 
 	#[test]

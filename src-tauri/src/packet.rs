@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::ops::RangeInclusive;
 
 use crate::reader::Reader;
@@ -43,6 +43,7 @@ const UUID_MARKER: u8 = 0x24;
 const UUID_LENGTH: usize = 36;
 const UUID_DASHES: [usize; 4] = [8, 13, 18, 23];
 const ROSTER_ENTITY_OFFSET: usize = 8;
+const ROSTER_NAME_OFFSET: usize = 8;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
@@ -55,7 +56,7 @@ pub enum Event {
 	Combat { entity: u64, active: bool },
 	MapChange { map: u32, revive: bool },
 	PartyMember { entity: u64 },
-	PartyRoster { entities: HashSet<u64> },
+	PartyRoster { members: HashMap<u64, Option<String>> },
 }
 
 #[derive(Debug, PartialEq)]
@@ -277,13 +278,17 @@ fn map_change(reader: &mut Reader) -> Option<Event> {
 }
 
 fn party_roster(data: &[u8]) -> Option<Event> {
-	let entities: HashSet<u64> = (ROSTER_ENTITY_OFFSET..data.len())
+	let members: HashMap<u64, Option<String>> = (ROSTER_ENTITY_OFFSET..data.len())
 		.filter(|anchor| data[*anchor] == UUID_MARKER && data.get(anchor + 1..anchor + 1 + UUID_LENGTH).is_some_and(uuid))
-		.filter_map(|anchor| Reader::new(&data[anchor - ROSTER_ENTITY_OFFSET..]).u32())
-		.filter(|entity| *entity != 0)
-		.map(u64::from)
+		.filter_map(|anchor| {
+			let entity = Reader::new(&data[anchor - ROSTER_ENTITY_OFFSET..]).u32()?;
+			let mut reader = Reader::new(&data[anchor + 1 + UUID_LENGTH..]);
+			let name = reader.skip(ROSTER_NAME_OFFSET).and_then(|_| reader.string());
+			Some((u64::from(entity), name))
+		})
+		.filter(|(entity, _)| *entity != 0)
 		.collect();
-	(!entities.is_empty()).then_some(Event::PartyRoster { entities })
+	(!members.is_empty()).then_some(Event::PartyRoster { members })
 }
 
 fn uuid(text: &[u8]) -> bool {
@@ -302,12 +307,13 @@ mod tests {
 		Some(Event::Hit(Hit { target, actor, skill, damage, critical: false, dot: false, drain }))
 	}
 
-	fn roster_row(entity: u32) -> Vec<u8> {
+	fn roster_row(entity: u32, name: &str) -> Vec<u8> {
 		let mut row = vec![0x03, 0x04];
 		row.extend(entity.to_le_bytes());
 		row.extend([0xEF, 0x03, 0xA9, 0x0F, UUID_MARKER]);
 		row.extend(b"00000000-0000-4000-8000-000000000001");
-		row.extend([0x02, 0x65, 0x01, 0x00]);
+		row.extend([0x02, 0x65, 0x01, 0x00, 0x00, 0x00, 0xEF, 0x03, name.len() as u8]);
+		row.extend(name.as_bytes());
 		row
 	}
 
@@ -412,10 +418,10 @@ mod tests {
 	#[test]
 	fn decodes_party_roster() {
 		let mut body = bytes("00 92 00 4e 8f 06 00 cb 34 c5 16 00 00 00 00 00 05");
-		body.extend(roster_row(5248));
-		body.extend(roster_row(0));
-		body.extend(roster_row(2204));
-		assert_eq!(decode(&body), Some(Event::PartyRoster { entities: HashSet::from([5248, 2204]) }));
+		body.extend(roster_row(5248, "Alpha"));
+		body.extend(roster_row(0, "Bravo"));
+		body.extend(roster_row(2204, "Charlie"));
+		assert_eq!(decode(&body), Some(Event::PartyRoster { members: HashMap::from([(5248, Some(String::from("Alpha"))), (2204, Some(String::from("Charlie")))]) }));
 		assert_eq!(decode(&bytes("00 92 00 4e 8f 06 00 cb 34 c5 16 00 00 00 00 00 05")), None);
 	}
 }
