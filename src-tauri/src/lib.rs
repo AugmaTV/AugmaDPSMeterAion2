@@ -9,6 +9,7 @@ pub mod pcap;
 pub mod pktmon;
 mod reader;
 mod sessions;
+mod settings;
 pub mod stream;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -26,6 +27,7 @@ use crate::capture::Source;
 use crate::engine::Engine;
 use crate::meter::{Meter, Status};
 use crate::sessions::{Summary, View};
+use crate::settings::Settings;
 
 const WINDOW: &str = "main";
 const SPLASH: &str = "splash";
@@ -43,6 +45,7 @@ static RESET: AtomicBool = AtomicBool::new(false);
 static LOCKED: AtomicBool = AtomicBool::new(false);
 static PARTY_ONLY: AtomicBool = AtomicBool::new(true);
 static DUNGEON: AtomicBool = AtomicBool::new(false);
+static EXITING: AtomicBool = AtomicBool::new(false);
 static OPENING: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize, Clone)]
@@ -76,18 +79,7 @@ async fn open_overlay(app: AppHandle, mode: String) -> Result<()> {
 	while app.get_webview_window(&format!("{OVERLAY}-{mode}-{index}")).is_some() {
 		index += 1;
 	}
-	WebviewWindowBuilder::new(&app, format!("{OVERLAY}-{mode}-{index}"), WebviewUrl::default())
-		.title("Augma DPS Overlay")
-		.inner_size(300.0, 220.0)
-		.min_inner_size(200.0, 100.0)
-		.decorations(false)
-		.transparent(true)
-		.shadow(false)
-		.always_on_top(true)
-		.skip_taskbar(true)
-		.focused(false)
-		.build()?;
-	let _ = app.global_shortcut().register(LOCK_SHORTCUT);
+	create_overlay(&app, format!("{OVERLAY}-{mode}-{index}"))?;
 	set_locked(&app, false);
 	Ok(())
 }
@@ -103,8 +95,9 @@ fn party_only() -> bool {
 }
 
 #[command]
-fn set_party_only(enabled: bool) {
+fn set_party_only(app: AppHandle, enabled: bool) {
 	PARTY_ONLY.store(enabled, Ordering::Relaxed);
+	persist(&app, None);
 }
 
 #[command]
@@ -113,8 +106,9 @@ fn dungeon() -> bool {
 }
 
 #[command]
-fn set_dungeon(enabled: bool) {
+fn set_dungeon(app: AppHandle, enabled: bool) {
 	DUNGEON.store(enabled, Ordering::Relaxed);
+	persist(&app, None);
 }
 
 #[command]
@@ -168,15 +162,22 @@ pub fn run() {
 			}
 			let app = window.app_handle();
 			if window.label() == WINDOW {
+				EXITING.store(true, Ordering::Relaxed);
 				app.exit(0);
-			} else if window.label().starts_with(OVERLAY) && overlays(app).all(|overlay| overlay.label() == window.label()) {
-				LOCKED.store(false, Ordering::Relaxed);
-				let _ = app.global_shortcut().unregister(LOCK_SHORTCUT);
-				let _ = app.emit("overlay", OverlayState { open: false, locked: false });
+			} else if window.label().starts_with(OVERLAY) {
+				if overlays(app).all(|overlay| overlay.label() == window.label()) {
+					LOCKED.store(false, Ordering::Relaxed);
+					let _ = app.global_shortcut().unregister(LOCK_SHORTCUT);
+					let _ = app.emit("overlay", OverlayState { open: false, locked: false });
+				}
+				persist(app, Some(window.label()));
 			}
 		})
 		.setup(|app| {
 			let handle = app.handle();
+			let settings = settings::load(handle);
+			PARTY_ONLY.store(settings.party_only, Ordering::Relaxed);
+			DUNGEON.store(settings.dungeon, Ordering::Relaxed);
 			capture(handle.clone());
 			update(handle.clone());
 			Ok(())
@@ -196,6 +197,39 @@ fn set_locked(app: &AppHandle, locked: bool) {
 		let _ = overlay.set_ignore_cursor_events(locked);
 	}
 	let _ = app.emit("overlay", OverlayState { open: overlays(app).next().is_some(), locked });
+	persist(app, None);
+}
+
+fn create_overlay(app: &AppHandle, label: String) -> Result<()> {
+	WebviewWindowBuilder::new(app, label, WebviewUrl::default())
+		.title("Augma DPS Overlay")
+		.inner_size(300.0, 220.0)
+		.min_inner_size(200.0, 100.0)
+		.decorations(false)
+		.transparent(true)
+		.shadow(false)
+		.always_on_top(true)
+		.skip_taskbar(true)
+		.focused(false)
+		.build()?;
+	let _ = app.global_shortcut().register(LOCK_SHORTCUT);
+	Ok(())
+}
+
+fn restore(app: &AppHandle) {
+	let settings = settings::load(app);
+	for label in settings.overlays {
+		let _ = create_overlay(app, label);
+	}
+	set_locked(app, settings.locked);
+}
+
+fn persist(app: &AppHandle, closing: Option<&str>) {
+	if EXITING.load(Ordering::Relaxed) {
+		return;
+	}
+	let overlays = overlays(app).map(|overlay| overlay.label().to_string()).filter(|label| Some(label.as_str()) != closing).collect();
+	let _ = settings::save(app, &Settings { party_only: PARTY_ONLY.load(Ordering::Relaxed), dungeon: DUNGEON.load(Ordering::Relaxed), locked: LOCKED.load(Ordering::Relaxed), overlays });
 }
 
 fn overlays(app: &AppHandle) -> impl Iterator<Item = WebviewWindow> {
@@ -287,6 +321,7 @@ fn update(app: AppHandle) {
 			}
 		}
 		reveal(&app);
+		restore(&app);
 	});
 }
 
