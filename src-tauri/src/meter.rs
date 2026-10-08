@@ -1,5 +1,5 @@
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
 use std::ops::Range;
 
@@ -15,6 +15,9 @@ const SPIRIT_SKILLS: [Range<u32>; 2] = [16_000_000..16_010_000, 16_990_000..17_0
 const MONSTER_SKILLS: Range<u32> = 1_000_000..2_000_000;
 const CLASS_COUNT: usize = 10;
 const DRAIN_SKILL: u32 = 1;
+const SECOND: u64 = 1_000_000;
+const ACTIVE_GAP: u64 = 3_000_000;
+const RECAP: usize = 5;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "kebab-case")]
@@ -33,6 +36,7 @@ pub struct Snapshot {
 	pub total_healing: u64,
 	pub total_taken: u64,
 	pub boss: Option<Boss>,
+	pub health: Vec<Option<f32>>,
 	pub players: Vec<Player>,
 }
 
@@ -71,6 +75,40 @@ pub struct Player {
 	pub gear: Option<u32>,
 	#[serde(default)]
 	pub power: Option<u64>,
+	#[serde(default)]
+	pub perfect: u64,
+	#[serde(default)]
+	pub hard: u64,
+	#[serde(default)]
+	pub back: u64,
+	#[serde(default)]
+	pub front: u64,
+	#[serde(default)]
+	pub additional: u64,
+	#[serde(default)]
+	pub active: u64,
+	#[serde(default)]
+	pub timeline: Vec<u64>,
+	#[serde(default)]
+	pub evasions: u64,
+	#[serde(default)]
+	pub resists: u64,
+	#[serde(default)]
+	pub blocks: u64,
+	#[serde(default)]
+	pub parries: u64,
+	#[serde(default)]
+	pub perfect_blocks: u64,
+	#[serde(default)]
+	pub iron_walls: u64,
+	#[serde(default)]
+	pub effective: u64,
+	#[serde(default)]
+	pub recaps: Vec<Recap>,
+	#[serde(default)]
+	pub buffs: Vec<Uptime>,
+	#[serde(default)]
+	pub debuffs: Vec<Uptime>,
 	pub own: bool,
 	pub member: bool,
 	pub skills: Vec<Skill>,
@@ -85,6 +123,43 @@ pub struct Skill {
 	pub amount: u64,
 	pub hits: u64,
 	pub crits: u64,
+	#[serde(default)]
+	pub perfect: u64,
+	#[serde(default)]
+	pub hard: u64,
+	#[serde(default)]
+	pub back: u64,
+	#[serde(default)]
+	pub casts: u64,
+	#[serde(default)]
+	pub max: u64,
+	#[serde(default)]
+	pub effective: u64,
+	#[serde(default)]
+	pub variants: Vec<u32>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Recap {
+	pub at: u64,
+	pub blows: Vec<Blow>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct Blow {
+	pub at: u64,
+	pub npc: u32,
+	pub skill: u32,
+	pub amount: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Uptime {
+	pub id: u32,
+	pub active: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -93,6 +168,8 @@ pub struct Fight {
 	pub start: u64,
 	pub last: u64,
 	pub boss: Option<Boss>,
+	#[serde(default)]
+	pub health: Vec<Option<f32>>,
 	pub players: Vec<Player>,
 }
 
@@ -103,6 +180,7 @@ pub struct Meter {
 	spawned: HashSet<u64>,
 	owners: HashMap<u64, u64>,
 	fallen: HashMap<u64, Option<u64>>,
+	buffs: HashMap<(u64, u32, u64), (u64, u64)>,
 	vitals: HashMap<u64, Vitals>,
 	own: Option<u64>,
 	party: HashSet<u64>,
@@ -138,6 +216,8 @@ struct Encounter {
 	targets: HashMap<u64, u64>,
 	actors: HashMap<u64, Stats>,
 	members: HashSet<u64>,
+	uptimes: HashMap<(u64, u32, u64), u64>,
+	health: HashMap<u64, Vec<(u64, u64)>>,
 	frozen: Option<Fight>,
 }
 
@@ -152,6 +232,23 @@ struct Stats {
 	deaths: u64,
 	revived: u64,
 	resurrections: u64,
+	perfect: u64,
+	hard: u64,
+	back: u64,
+	front: u64,
+	additional: u64,
+	active: u64,
+	last: Option<u64>,
+	timeline: Vec<u64>,
+	evasions: u64,
+	resists: u64,
+	blocks: u64,
+	parries: u64,
+	perfect_blocks: u64,
+	iron_walls: u64,
+	effective: u64,
+	recent: VecDeque<Blow>,
+	recaps: Vec<Recap>,
 	skills: HashMap<u32, Totals>,
 	heals: HashMap<u32, Totals>,
 	sources: HashMap<u32, Totals>,
@@ -162,6 +259,14 @@ struct Totals {
 	amount: u64,
 	hits: u64,
 	crits: u64,
+	perfect: u64,
+	hard: u64,
+	back: u64,
+	casts: u64,
+	max: u64,
+	effective: u64,
+	cast: Option<u8>,
+	variants: HashSet<u32>,
 }
 
 impl Meter {
@@ -169,6 +274,8 @@ impl Meter {
 		match event {
 			Event::Hit(hit) => self.hit(micros, hit),
 			Event::Heal(heal) => self.heal(micros, heal),
+			Event::Avoid { target, actor, resisted } => self.avoid(micros, target, actor, resisted),
+			Event::Buff { target, caster, effect, duration } => self.buff(micros, target, caster, effect, duration),
 			Event::Resurrection { target, actor } => {
 				let actor = self.owner(actor);
 				if self.is_player(actor) {
@@ -199,6 +306,11 @@ impl Meter {
 				self.map = Some(map);
 			}
 			Event::PartyMember { entity } => self.join(entity),
+			Event::PartyStatus { entity, hp, max } => {
+				self.join(entity);
+				self.vitals.entry(entity).or_default().max = Some(max);
+				self.health(micros, entity, hp);
+			}
 			Event::PartyRoster { members } => {
 				let entities: HashSet<u64> = members.keys().copied().collect();
 				for left in self.roster.difference(&entities) {
@@ -231,6 +343,7 @@ impl Meter {
 		self.spawned.clear();
 		self.owners.clear();
 		self.fallen.clear();
+		self.buffs.clear();
 		self.vitals.clear();
 		self.own = None;
 		self.party.clear();
@@ -308,25 +421,63 @@ impl Meter {
 				vitals.before += hit.damage;
 			}
 		}
-		let encounter = self.encounter.get_or_insert_with(|| Encounter { zone: self.zone, start: micros, last: micros, ended: None, targets: HashMap::new(), actors: HashMap::new(), members: self.party.clone(), frozen: None });
+		let drained = self.vitals.get(&actor).map_or(hit.drain, |vitals| hit.drain.min(vitals.limit().saturating_sub(vitals.hp)));
+		let encounter = self.encounter.get_or_insert_with(|| Encounter {
+			zone: self.zone,
+			start: micros,
+			last: micros,
+			ended: None,
+			targets: HashMap::new(),
+			actors: HashMap::new(),
+			members: self.party.clone(),
+			uptimes: HashMap::new(),
+			health: HashMap::new(),
+			frozen: None,
+		});
 		if starts {
 			encounter.last = encounter.last.max(micros);
 			*encounter.targets.entry(hit.target).or_default() += hit.damage;
 		}
+		let second = (micros.saturating_sub(encounter.start) / SECOND) as usize;
 		let stats = encounter.actors.entry(actor).or_default();
 		let skill = stats.skills.entry(base_skill(hit.skill)).or_default();
 		stats.damage += hit.damage;
 		skill.amount += hit.damage;
+		skill.variants.insert(hit.skill);
+		if stats.timeline.len() <= second {
+			stats.timeline.resize(second + 1, 0);
+		}
+		stats.timeline[second] += hit.damage;
 		if !hit.dot {
+			let strike = hit.strike;
 			stats.hits += 1;
 			stats.crits += hit.critical as u64;
+			stats.perfect += strike.perfect as u64;
+			stats.hard += strike.hard as u64;
+			stats.back += strike.back as u64;
+			stats.front += strike.front as u64;
+			stats.additional += strike.additional as u64;
 			skill.hits += 1;
 			skill.crits += hit.critical as u64;
+			skill.perfect += strike.perfect as u64;
+			skill.hard += strike.hard as u64;
+			skill.back += strike.back as u64;
+			skill.max = skill.max.max(hit.damage);
+			if skill.cast != Some(hit.cast) {
+				skill.cast = Some(hit.cast);
+				skill.casts += 1;
+			}
+			if let Some(last) = stats.last.filter(|last| micros.saturating_sub(*last) <= ACTIVE_GAP) {
+				stats.active += micros.saturating_sub(last);
+			}
+			stats.last = Some(stats.last.map_or(micros, |last| last.max(micros)));
 		}
 		if hit.drain > 0 && starts {
 			stats.healing += hit.drain;
+			stats.effective += drained;
 			let drain = stats.heals.entry(DRAIN_SKILL).or_default();
 			drain.amount += hit.drain;
+			drain.effective += drained;
 			drain.hits += 1;
 		}
 	}
@@ -340,14 +491,49 @@ impl Meter {
 		if !self.is_player(healer) || !self.active(micros) {
 			return;
 		}
+		let effective = self.vitals.get(&heal.target).map_or(heal.amount, |vitals| heal.amount.min(vitals.limit().saturating_sub(vitals.hp)));
 		let Some(encounter) = &mut self.encounter else {
 			return;
 		};
 		let stats = encounter.actors.entry(healer).or_default();
 		let skill = stats.heals.entry(base_skill(heal.skill)).or_default();
 		stats.healing += heal.amount;
+		stats.effective += effective;
 		skill.amount += heal.amount;
+		skill.effective += effective;
 		skill.hits += 1;
+	}
+
+	fn avoid(&mut self, micros: u64, target: u64, actor: u64, resisted: bool) {
+		if !self.is_player(target) || self.is_player(self.owner(actor)) || !self.active(micros) {
+			return;
+		}
+		if let Some(encounter) = &mut self.encounter {
+			let stats = encounter.actors.entry(target).or_default();
+			if resisted {
+				stats.resists += 1;
+			} else {
+				stats.evasions += 1;
+			}
+		}
+	}
+
+	fn buff(&mut self, micros: u64, target: u64, caster: u64, effect: u32, duration: u32) {
+		let family = family(effect);
+		if !CLASS_SKILLS.contains(&family) {
+			return;
+		}
+		let key = (target, family, self.owner(caster));
+		let end = micros + duration as u64 * 1000;
+		let span = self.buffs.entry(key).or_insert((micros, end));
+		if micros <= span.1 {
+			span.1 = span.1.max(end);
+			return;
+		}
+		let closed = mem::replace(span, (micros, end));
+		if let Some(encounter) = &mut self.encounter {
+			*encounter.uptimes.entry(key).or_default() += closed.1.saturating_sub(closed.0.max(encounter.start));
+		}
 	}
 
 	fn take(&mut self, micros: u64, hit: Hit) {
@@ -363,8 +549,17 @@ impl Meter {
 		stats.taken += hit.damage;
 		source.amount += hit.damage;
 		if !hit.dot {
+			let strike = hit.strike;
 			stats.taken_hits += 1;
+			stats.blocks += strike.blocked as u64;
+			stats.parries += strike.parried as u64;
+			stats.perfect_blocks += strike.perfect_block as u64;
+			stats.iron_walls += strike.iron_wall as u64;
 			source.hits += 1;
+		}
+		stats.recent.push_back(Blow { at: micros, npc, skill: hit.skill, amount: hit.damage });
+		if stats.recent.len() > RECAP {
+			stats.recent.pop_front();
 		}
 	}
 
@@ -394,6 +589,11 @@ impl Meter {
 			vitals.in_combat = false;
 		}
 		let reset = vitals.max == Some(hp) && vitals.combat_seen && !vitals.in_combat;
+		if let Some(encounter) = &mut self.encounter {
+			if encounter.targets.contains_key(&entity) {
+				encounter.health.entry(entity).or_default().push((micros, hp));
+			}
+		}
 		if hp == 0 || reset {
 			self.finish(micros, entity);
 		}
@@ -411,7 +611,11 @@ impl Meter {
 			return;
 		}
 		if let Some(encounter) = &mut self.encounter {
-			encounter.actors.entry(entity).or_default().deaths += 1;
+			let start = encounter.start;
+			let stats = encounter.actors.entry(entity).or_default();
+			stats.deaths += 1;
+			let blows = stats.recent.drain(..).map(|blow| Blow { at: blow.at.saturating_sub(start) / 1000, ..blow }).collect();
+			stats.recaps.push(Recap { at: micros.saturating_sub(start) / 1000, blows });
 		}
 	}
 
@@ -469,7 +673,10 @@ impl Meter {
 	fn fight(&self, encounter: &Encounter) -> Fight {
 		match &encounter.frozen {
 			Some(frozen) => frozen.clone(),
-			None => Fight { start: encounter.start, last: encounter.last, boss: self.boss(encounter), players: self.players(encounter) },
+			None => {
+				let target = self.target(encounter);
+				Fight { start: encounter.start, last: encounter.last, boss: self.boss(target), health: self.series(encounter, target), players: self.players(encounter, target) }
+			}
 		}
 	}
 
@@ -504,12 +711,12 @@ impl Meter {
 		})
 	}
 
-	fn players(&self, encounter: &Encounter) -> Vec<Player> {
+	fn players(&self, encounter: &Encounter, target: Option<u64>) -> Vec<Player> {
 		let elapsed = encounter.last - encounter.start;
 		let mut players: Vec<Player> = encounter
 			.actors
 			.iter()
-			.filter(|(id, stats)| self.is_player(**id) && (stats.damage > 0 || stats.healing > 0 || stats.taken > 0 || stats.deaths > 0 || stats.resurrections > 0))
+			.filter(|(id, stats)| self.is_player(**id) && (stats.damage > 0 || stats.healing > 0 || stats.taken > 0 || stats.deaths > 0 || stats.resurrections > 0 || stats.evasions + stats.resists > 0))
 			.map(|(id, stats)| (id, stats, self.names.get(id).and_then(|name| self.profiles.get(name))))
 			.map(|(id, stats, profile)| Player {
 				id: *id,
@@ -529,6 +736,23 @@ impl Meter {
 				resurrections: stats.resurrections,
 				gear: profile.map(|(gear, _)| *gear),
 				power: profile.map(|(_, power)| *power),
+				perfect: stats.perfect,
+				hard: stats.hard,
+				back: stats.back,
+				front: stats.front,
+				additional: stats.additional,
+				active: stats.active / 1000,
+				timeline: stats.timeline.clone(),
+				evasions: stats.evasions,
+				resists: stats.resists,
+				blocks: stats.blocks,
+				parries: stats.parries,
+				perfect_blocks: stats.perfect_blocks,
+				iron_walls: stats.iron_walls,
+				effective: stats.effective,
+				recaps: stats.recaps.clone(),
+				buffs: self.uptimes(encounter, |(buffed, _, _)| buffed == id),
+				debuffs: self.uptimes(encounter, |(buffed, _, caster)| caster == id && Some(*buffed) == target),
 				own: self.own == Some(*id),
 				member: self.own == Some(*id) || encounter.members.contains(id),
 				skills: skills(&stats.skills),
@@ -540,10 +764,45 @@ impl Meter {
 		players
 	}
 
-	fn boss(&self, encounter: &Encounter) -> Option<Boss> {
-		let (id, _) = encounter.targets.iter().filter(|(target, _)| !self.is_player(**target) && !self.owners.contains_key(target)).max_by_key(|(_, damage)| **damage)?;
-		let vitals = self.vitals.get(id).filter(|vitals| vitals.first.is_some())?;
+	fn target(&self, encounter: &Encounter) -> Option<u64> {
+		encounter.targets.iter().filter(|(target, _)| !self.is_player(**target) && !self.owners.contains_key(target)).max_by_key(|(_, damage)| **damage).map(|(target, _)| *target)
+	}
+
+	fn boss(&self, target: Option<u64>) -> Option<Boss> {
+		let vitals = self.vitals.get(&target?).filter(|vitals| vitals.first.is_some())?;
 		Some(Boss { npc: vitals.npc, hp: vitals.hp, max: vitals.limit(), estimated: vitals.max.is_none(), dead: vitals.dead })
+	}
+
+	fn series(&self, encounter: &Encounter, target: Option<u64>) -> Vec<Option<f32>> {
+		let Some(target) = target else {
+			return Vec::new();
+		};
+		let limit = self.vitals.get(&target).map_or(0, Vitals::limit).max(1) as f32;
+		let mut samples = encounter.health.get(&target).into_iter().flatten().peekable();
+		let mut current = None;
+		(0..=(encounter.last - encounter.start) / SECOND)
+			.map(|second| {
+				let until = encounter.start + (second + 1) * SECOND;
+				while let Some((_, hp)) = samples.next_if(|(at, _)| *at < until) {
+					current = Some((*hp as f32 * 100.0 / limit).min(100.0));
+				}
+				current
+			})
+			.collect()
+	}
+
+	fn uptimes(&self, encounter: &Encounter, matches: impl Fn(&(u64, u32, u64)) -> bool) -> Vec<Uptime> {
+		let elapsed = encounter.last - encounter.start;
+		let mut families: HashMap<u32, u64> = HashMap::new();
+		for (key, span) in self.buffs.iter().filter(|(key, _)| matches(key)) {
+			let open = span.1.min(encounter.last).saturating_sub(span.0.max(encounter.start));
+			let active = (encounter.uptimes.get(key).copied().unwrap_or_default() + open).min(elapsed) / 1000;
+			let family = families.entry(key.1).or_default();
+			*family = (*family).max(active);
+		}
+		let mut uptimes: Vec<Uptime> = families.into_iter().filter(|(_, active)| *active > 0).map(|(id, active)| Uptime { id, active }).collect();
+		uptimes.sort_by_key(|uptime| Reverse(uptime.active));
+		uptimes
 	}
 
 	fn vote(&mut self, actor: u64, target: u64, skill: u32) {
@@ -589,19 +848,26 @@ fn base_skill(skill: u32) -> u32 {
 
 pub fn summarize(status: Status, fights: &[&Fight], party_only: bool) -> Snapshot {
 	let (Some(first), Some(last)) = (fights.first(), fights.last()) else {
-		return Snapshot { status, duration: 0, total: 0, total_healing: 0, total_taken: 0, boss: None, players: Vec::new() };
+		return Snapshot { status, duration: 0, total: 0, total_healing: 0, total_taken: 0, boss: None, health: Vec::new(), players: Vec::new() };
 	};
 	let elapsed = last.last - first.start;
 	let mut players = Vec::new();
+	let mut health = vec![None; (elapsed / SECOND) as usize + 1];
 	for fight in fights.iter().rev() {
+		let offset = fight.start - first.start;
 		for player in &fight.players {
-			merge(&mut players, player);
+			merge(&mut players, player, offset);
+		}
+		let start = (offset / SECOND) as usize;
+		for (slot, percent) in health.iter_mut().skip(start).zip(&fight.health) {
+			*slot = slot.or(*percent);
 		}
 	}
 	for player in &mut players {
 		player.dps = per_second(player.damage, elapsed);
 		player.hps = per_second(player.healing, elapsed);
 		player.dtps = per_second(player.taken, elapsed);
+		player.recaps.sort_by_key(|recap| recap.at);
 	}
 	players.sort_by_key(|player| Reverse(player.damage));
 	if party_only {
@@ -614,6 +880,7 @@ pub fn summarize(status: Status, fights: &[&Fight], party_only: bool) -> Snapsho
 		total_healing: players.iter().map(|player| player.healing).sum(),
 		total_taken: players.iter().map(|player| player.taken).sum(),
 		boss: last.boss.clone(),
+		health,
 		players,
 	}
 }
@@ -622,9 +889,12 @@ fn per_second(amount: u64, micros: u64) -> u64 {
 	(amount as f64 / (micros as f64 / 1_000_000.0).max(1.0)) as u64
 }
 
-fn merge(players: &mut Vec<Player>, fighter: &Player) {
+fn merge(players: &mut Vec<Player>, fighter: &Player, offset: u64) {
 	let Some(player) = players.iter_mut().find(|player| player.id == fighter.id) else {
-		players.push(fighter.clone());
+		let mut player = Player { timeline: Vec::new(), recaps: Vec::new(), ..fighter.clone() };
+		spread(&mut player.timeline, &fighter.timeline, offset);
+		player.recaps.extend(shifted(&fighter.recaps, offset));
+		players.push(player);
 		return;
 	};
 	player.name = player.name.take().or_else(|| fighter.name.clone());
@@ -642,11 +912,53 @@ fn merge(players: &mut Vec<Player>, fighter: &Player) {
 	player.resurrections += fighter.resurrections;
 	player.gear = player.gear.or(fighter.gear);
 	player.power = player.power.or(fighter.power);
+	player.perfect += fighter.perfect;
+	player.hard += fighter.hard;
+	player.back += fighter.back;
+	player.front += fighter.front;
+	player.additional += fighter.additional;
+	player.active += fighter.active;
+	player.evasions += fighter.evasions;
+	player.resists += fighter.resists;
+	player.blocks += fighter.blocks;
+	player.parries += fighter.parries;
+	player.perfect_blocks += fighter.perfect_blocks;
+	player.iron_walls += fighter.iron_walls;
+	player.effective += fighter.effective;
 	player.own |= fighter.own;
 	player.member |= fighter.member;
+	spread(&mut player.timeline, &fighter.timeline, offset);
+	player.recaps.extend(shifted(&fighter.recaps, offset));
+	accumulate(&mut player.buffs, &fighter.buffs);
+	accumulate(&mut player.debuffs, &fighter.debuffs);
 	combine(&mut player.skills, &fighter.skills);
 	combine(&mut player.heals, &fighter.heals);
 	combine(&mut player.sources, &fighter.sources);
+}
+
+fn spread(timeline: &mut Vec<u64>, other: &[u64], offset: u64) {
+	let start = (offset / SECOND) as usize;
+	if timeline.len() < start + other.len() {
+		timeline.resize(start + other.len(), 0);
+	}
+	for (slot, value) in timeline.iter_mut().skip(start).zip(other) {
+		*slot += value;
+	}
+}
+
+fn shifted(recaps: &[Recap], offset: u64) -> impl Iterator<Item = Recap> + '_ {
+	let delay = offset / 1000;
+	recaps.iter().map(move |recap| Recap { at: recap.at + delay, blows: recap.blows.iter().map(|blow| Blow { at: blow.at + delay, ..*blow }).collect() })
+}
+
+fn accumulate(uptimes: &mut Vec<Uptime>, others: &[Uptime]) {
+	for other in others {
+		match uptimes.iter_mut().find(|uptime| uptime.id == other.id) {
+			Some(uptime) => uptime.active += other.active,
+			None => uptimes.push(other.clone()),
+		}
+	}
+	uptimes.sort_by_key(|uptime| Reverse(uptime.active));
 }
 
 fn combine(skills: &mut Vec<Skill>, others: &[Skill]) {
@@ -656,6 +968,18 @@ fn combine(skills: &mut Vec<Skill>, others: &[Skill]) {
 				skill.amount += other.amount;
 				skill.hits += other.hits;
 				skill.crits += other.crits;
+				skill.perfect += other.perfect;
+				skill.hard += other.hard;
+				skill.back += other.back;
+				skill.casts += other.casts;
+				skill.max = skill.max.max(other.max);
+				skill.effective += other.effective;
+				for variant in &other.variants {
+					if !skill.variants.contains(variant) {
+						skill.variants.push(*variant);
+					}
+				}
+				skill.variants.sort_unstable();
 			}
 			None => skills.push(other.clone()),
 		}
@@ -664,7 +988,26 @@ fn combine(skills: &mut Vec<Skill>, others: &[Skill]) {
 }
 
 fn skills(totals: &HashMap<u32, Totals>) -> Vec<Skill> {
-	let mut skills: Vec<Skill> = totals.iter().map(|(id, totals)| Skill { id: *id, amount: totals.amount, hits: totals.hits, crits: totals.crits }).collect();
+	let mut skills: Vec<Skill> = totals
+		.iter()
+		.map(|(id, totals)| {
+			let mut variants: Vec<u32> = totals.variants.iter().copied().collect();
+			variants.sort_unstable();
+			Skill {
+				id: *id,
+				amount: totals.amount,
+				hits: totals.hits,
+				crits: totals.crits,
+				perfect: totals.perfect,
+				hard: totals.hard,
+				back: totals.back,
+				casts: totals.casts,
+				max: totals.max,
+				effective: totals.effective,
+				variants,
+			}
+		})
+		.collect();
 	skills.sort_by_key(|skill| Reverse(skill.amount));
 	skills
 }
@@ -672,10 +1015,10 @@ fn skills(totals: &HashMap<u32, Totals>) -> Vec<Skill> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::packet::Profile;
+	use crate::packet::{Profile, Strike};
 
 	fn hit(target: u64, actor: u64, skill: u32, damage: u64) -> Event {
-		Event::Hit(Hit { target, actor, skill, damage, critical: false, dot: false, drain: 0 })
+		Event::Hit(Hit { target, actor, skill, damage, ..Hit::default() })
 	}
 
 	fn boss(entity: u64, hp: u64) -> Event {
@@ -753,7 +1096,7 @@ mod tests {
 		let mut meter = Meter::default();
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(0, Event::Heal(Heal { target: 1, actor: 2, skill: 17100450, amount: 300 }));
-		meter.apply(0, Event::Hit(Hit { target: 900, actor: 1, skill: 13010000, damage: 50, critical: false, dot: false, drain: 20 }));
+		meter.apply(0, Event::Hit(Hit { target: 900, actor: 1, skill: 13010000, damage: 50, dot: false, drain: 20, ..Hit::default() }));
 		let snapshot = meter.snapshot(Status::Live);
 		assert_eq!(snapshot.total_healing, 320);
 		assert_eq!(snapshot.players.iter().find(|player| player.id == 2).unwrap().heals[0].id, 17100000);
@@ -766,9 +1109,9 @@ mod tests {
 		meter.apply(0, boss(900, 5_000_000));
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(1_000_000, hit(1, 900, 1801966, 400));
-		meter.apply(1_000_000, Event::Hit(Hit { target: 1, actor: 900, skill: 1801966, damage: 50, critical: false, dot: true, drain: 0 }));
+		meter.apply(1_000_000, Event::Hit(Hit { target: 1, actor: 900, skill: 1801966, damage: 50, dot: true, drain: 0, ..Hit::default() }));
 		meter.apply(1_000_000, hit(1, 2, 11020000, 999));
-		meter.apply(1_000_000, Event::Hit(Hit { target: 1, actor: 900, skill: 18730002, damage: 2134, critical: false, dot: true, drain: 0 }));
+		meter.apply(1_000_000, Event::Hit(Hit { target: 1, actor: 900, skill: 18730002, damage: 2134, dot: true, drain: 0, ..Hit::default() }));
 		let snapshot = meter.snapshot(Status::Live);
 		let player = snapshot.players.iter().find(|player| player.id == 1).unwrap();
 		assert_eq!((snapshot.total_taken, player.taken, player.taken_hits), (450, 450, 1));
@@ -926,6 +1269,61 @@ mod tests {
 		let snapshot = meter.snapshot(Status::Live);
 		let player = |id| snapshot.players.iter().find(|player| player.id == id).unwrap();
 		assert_eq!((player(1).deaths, player(1).revived, player(2).resurrections), (2, 1, 1));
+	}
+
+	#[test]
+	fn tracks_hit_quality_and_casts() {
+		let mut meter = Meter::default();
+		let strike = Strike { perfect: true, back: true, ..Strike::default() };
+		meter.apply(0, Event::Hit(Hit { target: 900, actor: 1, skill: 11020010, damage: 100, cast: 1, strike, ..Hit::default() }));
+		meter.apply(0, Event::Hit(Hit { target: 901, actor: 1, skill: 11020010, damage: 300, cast: 1, ..Hit::default() }));
+		meter.apply(2_000_000, Event::Hit(Hit { target: 900, actor: 1, skill: 11020030, damage: 50, cast: 2, ..Hit::default() }));
+		meter.apply(9_000_000, Event::Hit(Hit { target: 900, actor: 1, skill: 11020010, damage: 50, cast: 3, ..Hit::default() }));
+		let snapshot = meter.snapshot(Status::Live);
+		let player = &snapshot.players[0];
+		let skill = &player.skills[0];
+		assert_eq!((player.perfect, player.back, player.active), (1, 1, 2000));
+		assert_eq!((skill.casts, skill.max, skill.variants.clone()), (3, 300, vec![11020010, 11020030]));
+		assert_eq!(player.timeline, vec![400, 0, 50, 0, 0, 0, 0, 0, 0, 50]);
+	}
+
+	#[test]
+	fn builds_death_recap() {
+		let mut meter = Meter::default();
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, hit(1, 900, 1801966, 400));
+		meter.apply(2_000_000, hit(1, 900, 1801967, 600));
+		meter.apply(2_500_000, Event::Health { entity: 1, hp: 0 });
+		let snapshot = meter.snapshot(Status::Live);
+		let recap = &snapshot.players[0].recaps[0];
+		assert_eq!((recap.at, recap.blows.len(), recap.blows[1].amount, recap.blows[1].at), (2500, 2, 600, 2000));
+	}
+
+	#[test]
+	fn measures_buff_uptime() {
+		let mut meter = Meter::default();
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(0, Event::Buff { target: 1, caster: 2, effect: 18160041, duration: 2000 });
+		meter.apply(0, Event::Buff { target: 900, caster: 1, effect: 11730007, duration: 20000 });
+		meter.apply(1_000_000, Event::Buff { target: 1, caster: 2, effect: 18160041, duration: 2000 });
+		meter.apply(8_000_000, Event::Buff { target: 1, caster: 2, effect: 18160041, duration: 2000 });
+		meter.apply(10_000_000, hit(900, 1, 11020000, 100));
+		let snapshot = meter.snapshot(Status::Live);
+		let player = &snapshot.players[0];
+		assert_eq!((player.buffs[0].id, player.buffs[0].active), (18160000, 5000));
+		assert_eq!((player.debuffs[0].id, player.debuffs[0].active), (11730000, 10000));
+	}
+
+	#[test]
+	fn estimates_effective_healing() {
+		let mut meter = Meter::default();
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(0, hit(900, 2, 17010000, 100));
+		meter.apply(0, Event::PartyStatus { entity: 1, hp: 900, max: 1000 });
+		meter.apply(1_000_000, Event::Heal(Heal { target: 1, actor: 2, skill: 17100450, amount: 300 }));
+		let snapshot = meter.snapshot(Status::Live);
+		let healer = snapshot.players.iter().find(|player| player.id == 2).unwrap();
+		assert_eq!((healer.healing, healer.effective), (300, 100));
 	}
 
 	#[test]

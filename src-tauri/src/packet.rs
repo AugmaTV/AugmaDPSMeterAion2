@@ -13,7 +13,10 @@ const HEALTH: [u8; 2] = [0x00, 0x8D];
 const COMBAT: [u8; 2] = [0x21, 0x8D];
 const MAP_CHANGE: [u8; 2] = [0x21, 0x36];
 const PARTY_ROSTER: [u8; 2] = [0x00, 0x92];
-const PARTY_MEMBERS: [[u8; 2]; 3] = [[0x0E, 0x92], [0x1A, 0x92], [0x1B, 0x92]];
+const PARTY_MEMBERS: [[u8; 2]; 2] = [[0x0E, 0x92], [0x1A, 0x92]];
+const PARTY_STATUS: [u8; 2] = [0x1B, 0x92];
+const BUFF_APPLY: [u8; 2] = [0x2A, 0x38];
+const BUFF_REFRESH: [u8; 2] = [0x2B, 0x38];
 const PARTY_PROFILES: [u8; 2] = [0x02, 0x97];
 const PARENT_MARKER: [u8; 8] = [0xFF; 8];
 const ZONE_FLAG: u8 = 0x01;
@@ -21,6 +24,19 @@ const ZONE_POSITION: Range<usize> = 2..14;
 const ZONE_MARKER: [u8; 2] = [0x07, 0x02];
 
 const CRITICAL: u64 = 3;
+const MISS: u64 = 1;
+const RESIST: u64 = 6;
+const ADDITIONAL: u64 = 0x20;
+const BLOCK: u8 = 0x01;
+const PARRY: u8 = 0x02;
+const PERFECT: u8 = 0x04;
+const HARD: u8 = 0x08;
+const IRON_WALL: u8 = 0x10;
+const PERFECT_BLOCK: u8 = 0x40;
+const BACK: u8 = 1;
+const FRONT: u8 = 2;
+const BUFF_TAG: u8 = 0x13;
+const PERMANENT: u32 = u32::MAX;
 const PLAIN_SWITCH: u64 = 0x04;
 const DRAIN_FLAG: u64 = 0x04;
 const DEAD_REASON: u8 = 3;
@@ -61,6 +77,8 @@ const PROFILE_REBIRTH: u8 = 0x10;
 pub enum Event {
 	Hit(Hit),
 	Heal(Heal),
+	Avoid { target: u64, actor: u64, resisted: bool },
+	Buff { target: u64, caster: u64, effect: u32, duration: u32 },
 	Resurrection { target: u64, actor: u64 },
 	Character { entity: u64, name: String, own: bool },
 	Spawn { entity: u64, owner: Option<u64>, vitals: Option<Vitals> },
@@ -69,11 +87,12 @@ pub enum Event {
 	Combat { entity: u64, active: bool },
 	MapChange { map: u32, revive: bool, entry: bool },
 	PartyMember { entity: u64 },
+	PartyStatus { entity: u64, hp: u64, max: u64 },
 	PartyRoster { members: HashMap<u64, Option<String>> },
 	PartyProfiles { profiles: Vec<Profile> },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct Hit {
 	pub target: u64,
 	pub actor: u64,
@@ -82,6 +101,21 @@ pub struct Hit {
 	pub critical: bool,
 	pub dot: bool,
 	pub drain: u64,
+	pub cast: u8,
+	pub strike: Strike,
+}
+
+#[derive(Debug, PartialEq, Default, Clone, Copy)]
+pub struct Strike {
+	pub perfect: bool,
+	pub hard: bool,
+	pub back: bool,
+	pub front: bool,
+	pub additional: bool,
+	pub blocked: bool,
+	pub parried: bool,
+	pub perfect_block: bool,
+	pub iron_wall: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -120,6 +154,9 @@ pub fn decode(body: &[u8]) -> Option<Event> {
 		MAP_CHANGE => map_change(&mut reader),
 		PARTY_ROSTER => party_roster(reader.rest()),
 		PARTY_PROFILES => party_profiles(&mut reader),
+		PARTY_STATUS => party_status(&mut reader),
+		BUFF_APPLY => buff(&mut reader, true),
+		BUFF_REFRESH => buff(&mut reader, false),
 		opcode if PARTY_MEMBERS.contains(&opcode) => Some(Event::PartyMember { entity: reader.varint()? }),
 		_ => None,
 	}
@@ -135,19 +172,34 @@ fn record(reader: &mut Reader) -> Option<Event> {
 	let flag = reader.varint()?;
 	let actor = reader.varint()?;
 	let skill = reader.u32()?;
-	reader.skip(1)?;
+	let cast = reader.u8()?;
 	let kind = reader.varint()?;
 	let layout = switch & 0x0F;
 	if family(skill) == RESURRECTION {
 		return (actor != target).then_some(Event::Resurrection { target, actor });
 	}
+	if kind == MISS || kind == RESIST {
+		return Some(Event::Avoid { target, actor, resisted: kind == RESIST });
+	}
 	if layout & 0x04 == 0 || skill == 0 {
 		return None;
 	}
+	let mut strike = Strike { additional: switch & ADDITIONAL != 0, ..Strike::default() };
 	if layout & 0x02 != 0 {
-		reader.skip(1)?;
+		let flags = reader.u8()?;
 		reader.varint()?;
-		reader.skip(1)?;
+		let direction = reader.u8()?;
+		strike = Strike {
+			perfect: flags & PERFECT != 0,
+			hard: flags & HARD != 0,
+			back: direction == BACK,
+			front: direction == FRONT,
+			blocked: flags & BLOCK != 0,
+			parried: flags & PARRY != 0,
+			perfect_block: flags & PERFECT_BLOCK != 0,
+			iron_wall: flags & IRON_WALL != 0,
+			..strike
+		};
 	}
 	reader.skip(8)?;
 	reader.varint()?;
@@ -160,7 +212,7 @@ fn record(reader: &mut Reader) -> Option<Event> {
 		return None;
 	}
 	let drain = if flag & DRAIN_FLAG != 0 { drain(reader, layout, switch).unwrap_or_default() } else { 0 };
-	Some(Event::Hit(Hit { target, actor, skill, damage: amount, critical: kind == CRITICAL, dot: false, drain }))
+	Some(Event::Hit(Hit { target, actor, skill, damage: amount, critical: kind == CRITICAL, dot: false, drain, cast, strike }))
 }
 
 fn drain(reader: &mut Reader, layout: u64, switch: u64) -> Option<u64> {
@@ -214,7 +266,7 @@ fn periodic(reader: &mut Reader) -> Option<Event> {
 	if kind & KIND_VALUE != 0 || actor == target || !consistent {
 		return None;
 	}
-	Some(Event::Hit(Hit { target, actor, skill, damage: remaining?, critical: false, dot: true, drain: 0 }))
+	Some(Event::Hit(Hit { target, actor, skill, damage: remaining?, dot: true, ..Hit::default() }))
 }
 
 fn character(reader: &mut Reader, own: bool) -> Option<Event> {
@@ -327,6 +379,29 @@ fn party_roster(data: &[u8]) -> Option<Event> {
 	(!members.is_empty()).then_some(Event::PartyRoster { members })
 }
 
+fn party_status(reader: &mut Reader) -> Option<Event> {
+	let entity = reader.varint()?;
+	let hp = reader.varint()?;
+	let max = reader.varint()?;
+	Some(Event::PartyStatus { entity, hp, max })
+}
+
+fn buff(reader: &mut Reader, applied: bool) -> Option<Event> {
+	let target = reader.varint()?;
+	if applied {
+		reader.skip(1)?;
+	}
+	if reader.u8()? != BUFF_TAG {
+		return None;
+	}
+	reader.varint()?;
+	let effect = reader.u32()? / 10;
+	let duration = reader.u32()?;
+	reader.skip(12)?;
+	let caster = reader.varint()?;
+	(duration != PERMANENT).then_some(Event::Buff { target, caster, effect, duration })
+}
+
 fn party_profiles(reader: &mut Reader) -> Option<Event> {
 	reader.skip(4)?;
 	reader.string()?;
@@ -384,9 +459,6 @@ mod tests {
 		hex.split_whitespace().map(|byte| u8::from_str_radix(byte, 16).unwrap()).collect()
 	}
 
-	fn hit(target: u64, actor: u64, skill: u32, damage: u64, drain: u64) -> Option<Event> {
-		Some(Event::Hit(Hit { target, actor, skill, damage, critical: false, dot: false, drain }))
-	}
 
 	fn roster_row(entity: u32, name: &str) -> Vec<u8> {
 		let mut row = vec![0x03, 0x04];
@@ -401,13 +473,14 @@ mod tests {
 	#[test]
 	fn decodes_back_attack_hit() {
 		let body = bytes("04 38 f5 a3 02 06 00 c7 7c e0 26 a8 00 01 02 00 00 01 8b 2f af 41 01 00 00 00 90 4e 2f 01 00");
-		assert_eq!(decode(&body), hit(37365, 15943, 11020000, 47, 0));
+		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 37365, actor: 15943, skill: 11020000, damage: 47, cast: 1, strike: Strike { back: true, ..Strike::default() }, ..Hit::default() })));
 	}
 
 	#[test]
 	fn decodes_hit_with_additional_strikes() {
 		let body = bytes("04 38 91 c1 02 26 00 a1 14 48 f1 ca 00 20 02 0c 00 01 2c 40 46 4f 01 00 00 00 8c 91 01 b1 d1 14 04 97 36 97 36 97 36 97 36 01 00");
-		assert_eq!(decode(&body), hit(41105, 2593, 13300040, 338097, 0));
+		let strike = Strike { perfect: true, hard: true, back: true, additional: true, ..Strike::default() };
+		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 41105, actor: 2593, skill: 13300040, damage: 338097, cast: 32, strike, ..Hit::default() })));
 	}
 
 	#[test]
@@ -449,7 +522,7 @@ mod tests {
 	#[test]
 	fn decodes_poison_tick() {
 		let body = bytes("05 38 cc a9 01 0a fc 29 94 02 08 54 d6 51 88 03 d7 80 d1 00");
-		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 21708, actor: 5372, skill: 13730007, damage: 392, critical: false, dot: true, drain: 0 })));
+		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 21708, actor: 5372, skill: 13730007, damage: 392, dot: true, ..Hit::default() })));
 	}
 
 	#[test]
@@ -475,7 +548,7 @@ mod tests {
 	#[test]
 	fn decodes_kind_4a() {
 		let body = bytes("05 38 be e8 01 4a e7 21 4f ec 56 02 44 13 c8 7e 18 00 78 1a ae 00");
-		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 29758, actor: 4327, skill: 11410040, damage: 19, critical: false, dot: true, drain: 0 })));
+		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 29758, actor: 4327, skill: 11410040, damage: 19, dot: true, ..Hit::default() })));
 	}
 
 	#[test]
@@ -511,9 +584,21 @@ mod tests {
 	}
 
 	#[test]
+	fn decodes_avoided_hits() {
+		assert_eq!(decode(&bytes("04 38 b5 26 02 00 df b5 01 36 e9 12 00 01 01 20 00 00 23 19 63 07 01 00 00 00 90 4e 01 00")), Some(Event::Avoid { target: 4917, actor: 23263, resisted: false }));
+		assert_eq!(decode(&bytes("04 38 d9 7a 00 01 88 89 01 2a 83 1b 00 01 06 74 3c bf 0a 01 00 00 00 90 4e 01 97 1b b7 00 01 00")), Some(Event::Avoid { target: 15705, actor: 17544, resisted: true }));
+	}
+
+	#[test]
+	fn decodes_buffs() {
+		assert_eq!(decode(&bytes("2a 38 fc 29 01 13 59 b1 0c f5 07 b8 0b 00 00 00 00 00 00 2d 57 59 16 a1 01 00 00 fc 29 01")), Some(Event::Buff { target: 5372, caster: 5372, effect: 13350008, duration: 3000 }));
+		assert_eq!(decode(&bytes("2b 38 fc 29 13 59 b1 0c f5 07 b8 0b 00 00 00 00 00 00 1b 5a 59 16 a1 01 00 00 fc 29 01")), Some(Event::Buff { target: 5372, caster: 5372, effect: 13350008, duration: 3000 }));
+	}
+
+	#[test]
 	fn decodes_party_members() {
 		assert_eq!(decode(&bytes("0e 92 8b 2b 00")), Some(Event::PartyMember { entity: 5515 }));
-		assert_eq!(decode(&bytes("1b 92 e6 7d 00 bf 9c 01 a5 15 00 00 bd 17 00 00 00 00 00 00 00 00 00 00 a6 73 00 00 f0 49 02 00 00")), Some(Event::PartyMember { entity: 16102 }));
+		assert_eq!(decode(&bytes("1b 92 e6 7d 00 bf 9c 01 a5 15 00 00 bd 17 00 00 00 00 00 00 00 00 00 00 a6 73 00 00 f0 49 02 00 00")), Some(Event::PartyStatus { entity: 16102, hp: 0, max: 20031 }));
 	}
 
 	#[test]

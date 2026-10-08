@@ -9,6 +9,30 @@ export type Skill = {
 	amount: number;
 	hits: number;
 	crits: number;
+	perfect: number;
+	hard: number;
+	back: number;
+	casts: number;
+	max: number;
+	effective: number;
+	variants: number[];
+};
+
+export type Blow = {
+	at: number;
+	npc: number;
+	skill: number;
+	amount: number;
+};
+
+export type Recap = {
+	at: number;
+	blows: Blow[];
+};
+
+export type Uptime = {
+	id: number;
+	active: number;
 };
 
 export type Player = {
@@ -29,6 +53,23 @@ export type Player = {
 	resurrections: number;
 	gear: number | null;
 	power: number | null;
+	perfect: number;
+	hard: number;
+	back: number;
+	front: number;
+	additional: number;
+	active: number;
+	timeline: number[];
+	evasions: number;
+	resists: number;
+	blocks: number;
+	parries: number;
+	perfectBlocks: number;
+	ironWalls: number;
+	effective: number;
+	recaps: Recap[];
+	buffs: Uptime[];
+	debuffs: Uptime[];
 	own: boolean;
 	skills: Skill[];
 	heals: Skill[];
@@ -50,6 +91,7 @@ export type Snapshot = {
 	totalHealing: number;
 	totalTaken: number;
 	boss: Boss | null;
+	health: (number | null)[];
 	players: Player[];
 };
 

@@ -13,7 +13,7 @@ export function MeterView({ snapshot, mode, selected, onSelect }: { snapshot: Sn
 	const player = snapshot?.players.find((player) => player.id === selected);
 	const top = players[0] ? amount(players[0], mode) : 1;
 	if (player) {
-		return <PlayerDetail player={player} mode={mode} onBack={() => onSelect(null)} />;
+		return <PlayerDetail player={player} players={snapshot?.players ?? []} duration={snapshot?.duration ?? 0} mode={mode} onBack={() => onSelect(null)} />;
 	}
 	return (
 		<section className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
