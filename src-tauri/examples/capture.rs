@@ -2,9 +2,12 @@ use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io;
 use std::net::Ipv4Addr;
 use std::path::PathBuf;
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use augma_dps_meter_lib::capture::Source;
@@ -32,12 +35,19 @@ fn main() {
 	let directory = PathBuf::from("captures");
 	fs::create_dir_all(&directory).expect("impossible de créer le dossier captures");
 	let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_secs()).unwrap_or_default();
-	println!("Capture via {} pendant {seconds} s...", source.name());
+	let stopped = Arc::new(AtomicBool::new(false));
+	let flag = stopped.clone();
+	thread::spawn(move || {
+		let mut line = String::new();
+		let _ = io::stdin().read_line(&mut line);
+		flag.store(true, Ordering::Relaxed);
+	});
+	println!("Capture via {} pendant {seconds} s, Entrée pour arrêter...", source.name());
 	let mut writers: HashMap<i32, PcapWriter> = HashMap::new();
 	let mut flows: HashMap<FlowKey, FlowStats> = HashMap::new();
 	let started = Instant::now();
 	let mut reported = Instant::now();
-	while started.elapsed() < Duration::from_secs(seconds) {
+	while started.elapsed() < Duration::from_secs(seconds) && !stopped.load(Ordering::Relaxed) {
 		if let Ok(packet) = receiver.recv_timeout(POLL) {
 			if let Some(segment) = net::parse(packet.linktype, &packet.data) {
 				let path = directory.join(format!("aion2-{stamp}-{}.pcap", packet.linktype));
@@ -50,6 +60,9 @@ fn main() {
 			}
 		}
 		if reported.elapsed() >= REPORT {
+			for writer in writers.values_mut() {
+				writer.flush().expect("écriture pcap impossible");
+			}
 			let mut active: Vec<_> = flows.iter().filter(|(_, stats)| stats.ticks > 0).collect();
 			active.sort_by_key(|(_, stats)| Reverse(stats.ticks));
 			for (flow, stats) in active {
