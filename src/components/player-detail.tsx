@@ -35,7 +35,9 @@ const STATS: Record<Mode, (player: Player, duration: number) => [string, string]
 		["Surplus", compact(player.healing - player.effective)],
 	],
 	taken: (player) => [
-		["Total", compact(player.taken)],
+		["Net", compact(player.taken)],
+		["Brut", compact(player.taken + player.absorbed)],
+		["Absorbé", percent(player.absorbed, player.taken + player.absorbed)],
 		["Coups reçus", String(player.takenHits)],
 		["Esquives", String(player.evasions)],
 		["Résistances", String(player.resists)],

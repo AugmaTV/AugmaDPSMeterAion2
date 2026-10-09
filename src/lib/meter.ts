@@ -48,6 +48,7 @@ export type Player = {
 	taken: number;
 	dtps: number;
 	takenHits: number;
+	absorbed: number;
 	deaths: number;
 	revived: number;
 	resurrections: number;

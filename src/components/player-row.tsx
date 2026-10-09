@@ -1,3 +1,4 @@
+import { ShieldHalf } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ClassIcon } from "@/components/class-icon";
 import { CLASSES } from "@/lib/classes";
@@ -15,6 +16,12 @@ export function PlayerRow({ player, mode, top, total, onSelect }: { player: Play
 				<span className="truncate font-medium">{player.name ?? name}</span>
 				{player.own && <Badge className="h-4 px-1 text-[10px]">MOI</Badge>}
 				{player.gear !== null && <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">GS {player.gear}</span>}
+				{mode === "taken" && player.absorbed > 0 && (
+					<span className="flex shrink-0 items-center gap-0.5 text-[10px] text-sky-400 tabular-nums" title={`Brut ${compact(player.taken + player.absorbed)} · absorbé ${compact(player.absorbed)}`}>
+						<ShieldHalf className="size-3" />
+						{percent(player.absorbed, player.taken + player.absorbed)}
+					</span>
+				)}
 			</span>
 			<span className="relative w-14 text-right font-semibold tabular-nums">{compact(rate(player, mode))}</span>
 			<span className="relative w-10 text-right text-muted-foreground tabular-nums">{percent(value, total)}</span>

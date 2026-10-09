@@ -66,6 +66,8 @@ pub struct Player {
 	pub dtps: u64,
 	pub taken_hits: u64,
 	#[serde(default)]
+	pub absorbed: u64,
+	#[serde(default)]
 	pub deaths: u64,
 	#[serde(default)]
 	pub revived: u64,
@@ -229,6 +231,7 @@ struct Stats {
 	healing: u64,
 	taken: u64,
 	taken_hits: u64,
+	absorbed: u64,
 	deaths: u64,
 	revived: u64,
 	resurrections: u64,
@@ -546,8 +549,10 @@ impl Meter {
 		};
 		let stats = encounter.actors.entry(hit.target).or_default();
 		let source = stats.sources.entry(npc).or_default();
-		stats.taken += hit.damage;
-		source.amount += hit.damage;
+		let damage = hit.damage.saturating_sub(hit.absorbed);
+		stats.taken += damage;
+		stats.absorbed += hit.absorbed;
+		source.amount += damage;
 		if !hit.dot {
 			let strike = hit.strike;
 			stats.taken_hits += 1;
@@ -557,7 +562,7 @@ impl Meter {
 			stats.iron_walls += strike.iron_wall as u64;
 			source.hits += 1;
 		}
-		stats.recent.push_back(Blow { at: micros, npc, skill: hit.skill, amount: hit.damage });
+		stats.recent.push_back(Blow { at: micros, npc, skill: hit.skill, amount: damage });
 		if stats.recent.len() > RECAP {
 			stats.recent.pop_front();
 		}
@@ -731,6 +736,7 @@ impl Meter {
 				taken: stats.taken,
 				dtps: per_second(stats.taken, elapsed),
 				taken_hits: stats.taken_hits,
+				absorbed: stats.absorbed,
 				deaths: stats.deaths,
 				revived: stats.revived,
 				resurrections: stats.resurrections,
@@ -907,6 +913,7 @@ fn merge(players: &mut Vec<Player>, fighter: &Player, offset: u64) {
 	player.healing += fighter.healing;
 	player.taken += fighter.taken;
 	player.taken_hits += fighter.taken_hits;
+	player.absorbed += fighter.absorbed;
 	player.deaths += fighter.deaths;
 	player.revived += fighter.revived;
 	player.resurrections += fighter.resurrections;
@@ -1116,6 +1123,17 @@ mod tests {
 		let player = snapshot.players.iter().find(|player| player.id == 1).unwrap();
 		assert_eq!((snapshot.total_taken, player.taken, player.taken_hits), (450, 450, 1));
 		assert_eq!(player.sources[0].id, 2301014);
+	}
+
+	#[test]
+	fn counts_absorbed_damage_apart() {
+		let mut meter = Meter::default();
+		meter.apply(0, boss(900, 5_000_000));
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, Event::Hit(Hit { target: 1, actor: 900, skill: 1801966, damage: 500, absorbed: 100, ..Hit::default() }));
+		let snapshot = meter.snapshot(Status::Live);
+		let player = snapshot.players.iter().find(|player| player.id == 1).unwrap();
+		assert_eq!((snapshot.total_taken, player.taken, player.absorbed, player.sources[0].amount), (400, 400, 100, 400));
 	}
 
 	#[test]

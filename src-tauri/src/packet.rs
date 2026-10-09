@@ -32,6 +32,7 @@ const PARRY: u8 = 0x02;
 const PERFECT: u8 = 0x04;
 const HARD: u8 = 0x08;
 const IRON_WALL: u8 = 0x10;
+const ABSORB: u8 = 0x20;
 const PERFECT_BLOCK: u8 = 0x40;
 const BACK: u8 = 1;
 const FRONT: u8 = 2;
@@ -101,6 +102,7 @@ pub struct Hit {
 	pub critical: bool,
 	pub dot: bool,
 	pub drain: u64,
+	pub absorbed: u64,
 	pub cast: u8,
 	pub strike: Strike,
 }
@@ -185,10 +187,14 @@ fn record(reader: &mut Reader) -> Option<Event> {
 		return None;
 	}
 	let mut strike = Strike { additional: switch & ADDITIONAL != 0, ..Strike::default() };
+	let mut absorbed = 0;
 	if layout & 0x02 != 0 {
 		let flags = reader.u8()?;
-		reader.varint()?;
+		let reduction = reader.varint()?;
 		let direction = reader.u8()?;
+		if flags & ABSORB != 0 {
+			absorbed = reduction;
+		}
 		strike = Strike {
 			perfect: flags & PERFECT != 0,
 			hard: flags & HARD != 0,
@@ -212,7 +218,7 @@ fn record(reader: &mut Reader) -> Option<Event> {
 		return None;
 	}
 	let drain = if flag & DRAIN_FLAG != 0 { drain(reader, layout, switch).unwrap_or_default() } else { 0 };
-	Some(Event::Hit(Hit { target, actor, skill, damage: amount, critical: kind == CRITICAL, dot: false, drain, cast, strike }))
+	Some(Event::Hit(Hit { target, actor, skill, damage: amount, critical: kind == CRITICAL, dot: false, drain, absorbed, cast, strike }))
 }
 
 fn drain(reader: &mut Reader, layout: u64, switch: u64) -> Option<u64> {
@@ -481,6 +487,12 @@ mod tests {
 		let body = bytes("04 38 91 c1 02 26 00 a1 14 48 f1 ca 00 20 02 0c 00 01 2c 40 46 4f 01 00 00 00 8c 91 01 b1 d1 14 04 97 36 97 36 97 36 97 36 01 00");
 		let strike = Strike { perfect: true, hard: true, back: true, additional: true, ..Strike::default() };
 		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 41105, actor: 2593, skill: 13300040, damage: 338097, cast: 32, strike, ..Hit::default() })));
+	}
+
+	#[test]
+	fn decodes_absorbed_damage() {
+		let body = bytes("04 38 dd 10 06 00 ea f4 01 8b 76 18 00 05 02 20 b8 07 02 f3 4d 8e 09 01 00 00 00 90 4e 99 25 01 00");
+		assert_eq!(decode(&body), Some(Event::Hit(Hit { target: 2141, actor: 31338, skill: 1603211, damage: 4761, absorbed: 952, cast: 5, strike: Strike { front: true, ..Strike::default() }, ..Hit::default() })));
 	}
 
 	#[test]
