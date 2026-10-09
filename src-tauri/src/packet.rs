@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::ops::{Range, RangeInclusive};
 
+use serde::{Deserialize, Serialize};
+
 use crate::reader::Reader;
 
 const RECORD: [u8; 2] = [0x04, 0x38];
@@ -18,6 +20,10 @@ const PARTY_STATUS: [u8; 2] = [0x1B, 0x92];
 const BUFF_APPLY: [u8; 2] = [0x2A, 0x38];
 const BUFF_REFRESH: [u8; 2] = [0x2B, 0x38];
 const PARTY_PROFILES: [u8; 2] = [0x02, 0x97];
+const SKILL_LEVELS: [u8; 2] = [0x00, 0x51];
+const DAEVANION: [u8; 2] = [0x26, 0xE2];
+const OWN_EQUIPMENT: [u8; 2] = [0x11, 0x56];
+const PETS: [u8; 2] = [0x00, 0x90];
 const PARENT_MARKER: [u8; 8] = [0xFF; 8];
 const ZONE_FLAG: u8 = 0x01;
 const ZONE_POSITION: Range<usize> = 2..14;
@@ -73,6 +79,42 @@ const PROFILE_READY: u8 = 0x02;
 const PROFILE_ORIGIN: u8 = 0x04;
 const PROFILE_SERVER: u8 = 0x08;
 const PROFILE_REBIRTH: u8 = 0x10;
+const EQUIPMENT_SLOTS: RangeInclusive<u8> = 8..=24;
+const ITEM_CATEGORIES: [RangeInclusive<u32>; 7] = [1101..=1108, 1150..=1150, 2101..=2107, 2152..=2152, 3101..=3105, 3109..=3111, 8101..=8110];
+const ITEM_CATEGORY: u32 = 100_000;
+const CLASS_SKILL_IDS: Range<u32> = 11_000_000..20_000_000;
+const SKILL_FAMILY: u32 = 10_000;
+const SKILL_MARKER: u8 = 0x01;
+const SKILL_LEVEL_LIMIT: u8 = 30;
+const DAEVANION_BOARDS: RangeInclusive<u32> = 11..=89;
+const DAEVANION_NODE: u32 = 10_000;
+const EQUIPPED_MARKER: u8 = 0x0B;
+const EQUIPPED_SLOTS: RangeInclusive<u8> = 1..=50;
+const EQUIPPED_ENCHANT: usize = 26;
+const RECORD_LIMIT: usize = 240;
+const STONE_ITEMS: Range<u32> = 530_000_000..540_000_000;
+const STONE_TIER: u32 = 1_000;
+const MAX_STONE_TIER: u32 = 10;
+const STONE_RANKS: RangeInclusive<u8> = 1..=5;
+const STAT_CODES: Range<u16> = 1..1_000;
+const GODSTONES: Range<u32> = 19_950_000..19_960_000;
+const BOND_ANCHOR: [u8; 2] = [0x17, 0x05];
+const BOND_MARKER: u8 = 0x03;
+const BOND_PADDING: usize = 9;
+const BOND_COUNTS: RangeInclusive<u8> = 1..=8;
+const ARCANA: RangeInclusive<u32> = 8101..=8110;
+const SPECIES: RangeInclusive<u8> = 2..=6;
+const SPECIES_HEADER: usize = 15;
+const PERCEPTION_LEVELS: RangeInclusive<u32> = 1..=30;
+const PERCEPTION_PAGES: RangeInclusive<u8> = 1..=3;
+const PERCEPTION_GRADES: RangeInclusive<u8> = 1..=5;
+const PERCEPTION_VALUES: RangeInclusive<u32> = 1..=10_000;
+const PERCEPTION_EFFECT: usize = 12;
+const ARCANA_SKILL_COUNTS: RangeInclusive<u8> = 1..=6;
+const ARCANA_SKILL: usize = 5;
+const MAX_ENCHANT: u8 = 30;
+const RECORD_SEPARATOR: u8 = 0x0E;
+const RECORD_GAPS: Range<usize> = 18..240;
 
 #[derive(Debug, PartialEq)]
 pub enum Event {
@@ -81,7 +123,11 @@ pub enum Event {
 	Avoid { target: u64, actor: u64, resisted: bool },
 	Buff { target: u64, caster: u64, effect: u32, duration: u32 },
 	Resurrection { target: u64, actor: u64 },
-	Character { entity: u64, name: String, own: bool },
+	Character { entity: u64, name: String, own: bool, equipment: Vec<Gear> },
+	SkillLevels { levels: Vec<SkillLevel> },
+	Daevanion { boards: Vec<Board> },
+	OwnEquipment { equipment: Vec<Gear> },
+	Perception { species: Vec<Species> },
 	Spawn { entity: u64, owner: Option<u64>, vitals: Option<Vitals> },
 	Health { entity: u64, hp: u64 },
 	Despawn { entity: u64, dead: bool },
@@ -118,6 +164,63 @@ pub struct Strike {
 	pub parried: bool,
 	pub perfect_block: bool,
 	pub iron_wall: bool,
+}
+
+#[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
+pub struct Gear {
+	pub slot: u8,
+	pub id: u32,
+	pub enchant: u8,
+	#[serde(default)]
+	pub stones: Vec<Stone>,
+	#[serde(default)]
+	pub bonds: Vec<Bond>,
+	#[serde(default)]
+	pub godstone: Option<u32>,
+	#[serde(default)]
+	pub skills: Vec<SkillLevel>,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub struct Stone {
+	pub item: u32,
+	pub stat: u16,
+	pub rank: u8,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Species {
+	pub id: u8,
+	pub level: u32,
+	pub experience: u32,
+	pub effects: Vec<Effect>,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub struct Effect {
+	pub grade: u8,
+	pub stat: u16,
+	pub value: u32,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub struct Bond {
+	pub stat: u16,
+	pub value: u32,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub struct SkillLevel {
+	pub id: u32,
+	pub level: u8,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Board {
+	pub id: u32,
+	pub nodes: u32,
+	#[serde(default)]
+	pub opened: Vec<u32>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -157,6 +260,10 @@ pub fn decode(body: &[u8]) -> Option<Event> {
 		PARTY_ROSTER => party_roster(reader.rest()),
 		PARTY_PROFILES => party_profiles(&mut reader),
 		PARTY_STATUS => party_status(&mut reader),
+		SKILL_LEVELS => skill_levels(reader.rest()),
+		DAEVANION => daevanion(&mut reader),
+		OWN_EQUIPMENT => own_equipment(reader.rest()),
+		PETS => perception(reader.rest()),
 		BUFF_APPLY => buff(&mut reader, true),
 		BUFF_REFRESH => buff(&mut reader, false),
 		opcode if PARTY_MEMBERS.contains(&opcode) => Some(Event::PartyMember { entity: reader.varint()? }),
@@ -282,7 +389,198 @@ fn character(reader: &mut Reader, own: bool) -> Option<Event> {
 		return None;
 	}
 	let name = reader.string()?;
-	Some(Event::Character { entity, name, own })
+	Some(Event::Character { entity, name, own, equipment: equipment(reader.rest()) })
+}
+
+fn skill_levels(data: &[u8]) -> Option<Event> {
+	let levels: Vec<SkillLevel> = (1..data.len().saturating_sub(4))
+		.filter(|position| data[position - 1] == SKILL_MARKER)
+		.filter_map(|position| {
+			let id = u32::from_le_bytes(data.get(position..position + 4)?.try_into().ok()?);
+			let level = *data.get(position + 4)?;
+			(CLASS_SKILL_IDS.contains(&id) && id % SKILL_FAMILY == 0 && (1..=SKILL_LEVEL_LIMIT).contains(&level)).then_some(SkillLevel { id, level })
+		})
+		.collect();
+	(!levels.is_empty()).then_some(Event::SkillLevels { levels })
+}
+
+fn daevanion(reader: &mut Reader) -> Option<Event> {
+	let count = reader.u8()?;
+	let mut boards = Vec::new();
+	for _ in 0..count {
+		let id = reader.u32()?;
+		let nodes = reader.varint()? as usize;
+		let opened = (0..nodes).map(|_| reader.u32()).collect::<Option<Vec<u32>>>()?;
+		if !DAEVANION_BOARDS.contains(&id) || opened.iter().any(|node| node / DAEVANION_NODE != id) {
+			return None;
+		}
+		boards.push(Board { id, nodes: nodes.saturating_sub(1) as u32, opened });
+	}
+	(!boards.is_empty()).then_some(Event::Daevanion { boards })
+}
+
+fn perception(data: &[u8]) -> Option<Event> {
+	let mut headers: Vec<usize> = Vec::new();
+	for position in 0..data.len() {
+		if species_header(data, position) && headers.last().is_none_or(|last| data[position] > data[*last]) {
+			headers.push(position);
+		}
+	}
+	let ends = headers.iter().skip(1).copied().chain([data.len()]);
+	let species: Vec<Species> = headers.iter().zip(ends).map(|(start, end)| species_block(&data[*start..end])).collect();
+	(!species.is_empty()).then_some(Event::Perception { species })
+}
+
+fn species_header(data: &[u8], position: usize) -> bool {
+	let Some(header) = data.get(position..position + SPECIES_HEADER) else {
+		return false;
+	};
+	let level = u32::from_le_bytes([header[2], header[3], header[4], header[5]]);
+	SPECIES.contains(&header[0]) && header[1] == header[0] && PERCEPTION_LEVELS.contains(&level) && header[10..14] == [0; 4] && PERCEPTION_PAGES.contains(&header[14])
+}
+
+fn species_block(block: &[u8]) -> Species {
+	let mut effects = Vec::new();
+	let mut expected = 0;
+	let mut position = SPECIES_HEADER;
+	while position + PERCEPTION_EFFECT <= block.len() {
+		match perception_effect(block, position) {
+			Some((slot, effect)) if slot == expected => {
+				effects.push(effect);
+				expected += 1;
+				position += PERCEPTION_EFFECT;
+			}
+			Some(_) if expected > 0 => break,
+			_ => position += 1,
+		}
+	}
+	Species { id: block[0], level: u32::from_le_bytes([block[2], block[3], block[4], block[5]]), experience: u32::from_le_bytes([block[6], block[7], block[8], block[9]]), effects }
+}
+
+fn perception_effect(block: &[u8], position: usize) -> Option<(u8, Effect)> {
+	let entry = block.get(position..position + PERCEPTION_EFFECT)?;
+	let stat = u16::from_le_bytes([entry[2], entry[3]]);
+	let value = u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]);
+	(PERCEPTION_GRADES.contains(&entry[1]) && STAT_CODES.contains(&stat) && PERCEPTION_VALUES.contains(&value) && entry[8..12] == [0; 4]).then_some((entry[0], Effect { grade: entry[1], stat, value }))
+}
+
+fn own_equipment(data: &[u8]) -> Option<Event> {
+	let records = (0..data.len()).filter_map(|position| equipped(data, position).map(|gear| (position, gear))).collect();
+	let equipment = detailed(data, records);
+	(!equipment.is_empty()).then_some(Event::OwnEquipment { equipment })
+}
+
+fn equipped(data: &[u8], position: usize) -> Option<Gear> {
+	let id = u32::from_le_bytes(data.get(position..position + 4)?.try_into().ok()?);
+	let header = data.get(position + 4..position + 14)?;
+	if !item(id) || header[0] != 1 || header[1..8].iter().any(|byte| *byte != 0) || header[8] != EQUIPPED_MARKER || !EQUIPPED_SLOTS.contains(&header[9]) {
+		return None;
+	}
+	let enchant = match *data.get(position + EQUIPPED_ENCHANT)? {
+		0 => *data.get(position + EQUIPPED_ENCHANT + 1)?,
+		enchant => enchant,
+	};
+	(enchant <= MAX_ENCHANT).then_some(Gear { slot: header[9], id, enchant, ..Gear::default() })
+}
+
+fn equipment(data: &[u8]) -> Vec<Gear> {
+	(0..data.len()).find_map(|offset| gear_chain(data, offset)).unwrap_or_default()
+}
+
+fn gear_chain(data: &[u8], offset: usize) -> Option<Vec<Gear>> {
+	let count = *data.get(offset)?;
+	if !EQUIPMENT_SLOTS.contains(&count) {
+		return None;
+	}
+	let mut start = offset + 1;
+	let mut records = Vec::new();
+	for slot in 1..=count {
+		if slot > 1 {
+			let previous = start;
+			start = RECORD_GAPS.map(|gap| previous + gap).find(|candidate| data.get(candidate - 1) == Some(&RECORD_SEPARATOR) && gear(data, *candidate, slot).is_some())?;
+		}
+		records.push((start, gear(data, start, slot)?));
+	}
+	Some(detailed(data, records).into_iter().filter(|gear| gear.id != 0).collect())
+}
+
+fn gear(data: &[u8], start: usize, slot: u8) -> Option<Gear> {
+	let bytes = data.get(start..start + 6)?;
+	let id = u32::from_le_bytes(bytes[..4].try_into().ok()?);
+	let enchant = bytes[4];
+	(bytes[5] == slot && enchant <= MAX_ENCHANT && (id == 0 || item(id))).then_some(Gear { slot, id, enchant, ..Gear::default() })
+}
+
+fn detailed(data: &[u8], records: Vec<(usize, Gear)>) -> Vec<Gear> {
+	let ends: Vec<usize> = records.iter().skip(1).map(|(start, _)| *start).chain([data.len()]).collect();
+	records
+		.into_iter()
+		.zip(ends)
+		.map(|((start, gear), end)| {
+			let record = &data[start..end.min(start + RECORD_LIMIT)];
+			let skills = if ARCANA.contains(&(gear.id / ITEM_CATEGORY)) { arcana_skills(record) } else { Vec::new() };
+			Gear { stones: stones(record), bonds: bonds(record), godstone: godstone(record), skills, ..gear }
+		})
+		.collect()
+}
+
+fn stones(record: &[u8]) -> Vec<Stone> {
+	(0..record.len().saturating_sub(6))
+		.filter_map(|position| {
+			let item = u32::from_le_bytes([record[position], record[position + 1], record[position + 2], record[position + 3]]);
+			let stat = u16::from_le_bytes([record[position + 4], record[position + 5]]);
+			let rank = record[position + 6];
+			(STONE_ITEMS.contains(&item) && item % STONE_TIER <= MAX_STONE_TIER && STAT_CODES.contains(&stat) && STONE_RANKS.contains(&rank)).then_some(Stone { item, stat, rank })
+		})
+		.collect()
+}
+
+fn godstone(record: &[u8]) -> Option<u32> {
+	record.windows(4).map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])).find(|value| GODSTONES.contains(value))
+}
+
+fn arcana_skills(record: &[u8]) -> Vec<SkillLevel> {
+	(0..record.len()).find_map(|position| arcana_list(record, position)).unwrap_or_default()
+}
+
+fn arcana_list(record: &[u8], position: usize) -> Option<Vec<SkillLevel>> {
+	let count = *record.get(position)?;
+	if !ARCANA_SKILL_COUNTS.contains(&count) {
+		return None;
+	}
+	(0..count as usize)
+		.map(|index| {
+			let entry = record.get(position + 1 + ARCANA_SKILL * index..position + 1 + ARCANA_SKILL * (index + 1))?;
+			let id = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
+			let level = entry[4];
+			(CLASS_SKILL_IDS.contains(&id) && id % SKILL_FAMILY == 0 && (1..=SKILL_LEVEL_LIMIT).contains(&level)).then_some(SkillLevel { id, level })
+		})
+		.collect()
+}
+
+fn bonds(record: &[u8]) -> Vec<Bond> {
+	(0..record.len()).find_map(|position| bond_list(record, position)).unwrap_or_default()
+}
+
+fn bond_list(record: &[u8], position: usize) -> Option<Vec<Bond>> {
+	if record.get(position..position + 2)? != BOND_ANCHOR || *record.get(position + 3)? != BOND_MARKER || record.get(position + 8..position + 8 + BOND_PADDING)?.iter().any(|byte| *byte != 0) {
+		return None;
+	}
+	let start = position + 8 + BOND_PADDING;
+	let count = *record.get(start)?;
+	if !BOND_COUNTS.contains(&count) {
+		return None;
+	}
+	(0..count as usize)
+		.map(|index| {
+			let entry = record.get(start + 1 + 6 * index..start + 7 + 6 * index)?;
+			Some(Bond { stat: u16::from_le_bytes([entry[0], entry[1]]), value: u32::from_le_bytes([entry[2], entry[3], entry[4], entry[5]]) })
+		})
+		.collect()
+}
+
+fn item(id: u32) -> bool {
+	ITEM_CATEGORIES.iter().any(|categories| categories.contains(&(id / ITEM_CATEGORY)))
 }
 
 fn spawn(reader: &mut Reader) -> Option<Event> {
@@ -465,6 +763,93 @@ mod tests {
 		hex.split_whitespace().map(|byte| u8::from_str_radix(byte, 16).unwrap()).collect()
 	}
 
+
+	fn gear_record(id: u32, enchant: u8, slot: u8) -> Vec<u8> {
+		let mut record = id.to_le_bytes().to_vec();
+		record.extend([enchant, slot]);
+		record.extend([0; 14]);
+		record.push(RECORD_SEPARATOR);
+		record
+	}
+
+	#[test]
+	fn decodes_character_equipment() {
+		let mut body = bytes("45 36 2a 00 00 00 00 01 04 54 65 73 74 00 00 08");
+		let items = [(110330049, 15), (210330038, 10), (0, 0), (210130038, 10), (210230038, 10), (210530038, 10), (210630052, 10), (210730052, 3)];
+		for (index, (id, enchant)) in items.into_iter().enumerate() {
+			body.extend(gear_record(id, enchant, index as u8 + 1));
+		}
+		let Some(Event::Character { name, equipment, .. }) = decode(&body) else {
+			panic!("personnage non décodé");
+		};
+		assert_eq!(name, "Test");
+		assert_eq!(equipment.len(), 7);
+		assert_eq!(equipment[0], Gear { slot: 1, id: 110330049, enchant: 15, ..Gear::default() });
+		assert_eq!(equipment[6], Gear { slot: 8, id: 210730052, enchant: 3, ..Gear::default() });
+	}
+
+	#[test]
+	fn decodes_skill_levels() {
+		let body = bytes("00 51 47 01 eb 03 00 00 01 50 84 c6 00 0e 0a 04 00 00 01 e0 e3 c7 00 0c 0a 01 00 00 01 a0 b8 c9 00 00");
+		assert_eq!(decode(&body), Some(Event::SkillLevels { levels: vec![SkillLevel { id: 13010000, level: 14 }, SkillLevel { id: 13100000, level: 12 }] }));
+	}
+
+	#[test]
+	fn decodes_daevanion_boards() {
+		let body = bytes("26 e2 02 29 00 00 00 03 01 42 06 00 b1 41 06 00 b2 41 06 00 2e 00 00 00 01 e1 04 07 00");
+		assert_eq!(decode(&body), Some(Event::Daevanion { boards: vec![Board { id: 41, nodes: 2, opened: vec![410113, 410033, 410034] }, Board { id: 46, nodes: 0, opened: vec![460001] }] }));
+	}
+
+	#[test]
+	fn decodes_own_equipment() {
+		let mut body = bytes("11 56 00 00");
+		for (id, slot, enchant, offset) in [(110330049u32, 1u8, 15u8, 12usize), (210430052, 4, 10, 13), (810260001, 42, 2, 12)] {
+			body.extend(id.to_le_bytes());
+			body.extend([1, 0, 0, 0, 0, 0, 0, 0, EQUIPPED_MARKER, slot]);
+			let mut tail = vec![0; 20];
+			tail[offset] = enchant;
+			body.extend(tail);
+		}
+		assert_eq!(decode(&body), Some(Event::OwnEquipment { equipment: vec![Gear { slot: 1, id: 110330049, enchant: 15, ..Gear::default() }, Gear { slot: 4, id: 210430052, enchant: 10, ..Gear::default() }, Gear { slot: 42, id: 810260001, enchant: 2, ..Gear::default() }] }));
+	}
+
+	#[test]
+	fn decodes_gear_details() {
+		let mut body = bytes("11 56 00 00");
+		body.extend(110330049u32.to_le_bytes());
+		body.extend([1, 0, 0, 0, 0, 0, 0, 0, EQUIPPED_MARKER, 1]);
+		body.extend(bytes("00 00 00 00 00 00 00 00 00 00 00 00 0f 00 00 00 00 00 00 00 51 00 00 00 01 02 04 e9 ab 1f 3d 01 02 04 e9 ab 1f 80 00 01 ef 85 03 00 00 00 17 05 09 03 b7 69 30 01 00 00 00 00 00 00 00 00 00 02 3d 01 2a 00 00 00 9e 00 d8 07 00 00"));
+		let Some(Event::OwnEquipment { equipment }) = decode(&body) else {
+			panic!("équipement non décodé");
+		};
+		assert_eq!(equipment[0].stones, [Stone { item: 531360004, stat: 317, rank: 2 }, Stone { item: 531360004, stat: 128, rank: 1 }]);
+		assert_eq!(equipment[0].bonds, [Bond { stat: 317, value: 42 }, Bond { stat: 158, value: 2008 }]);
+		assert_eq!(equipment[0].godstone, Some(19950007));
+	}
+
+	#[test]
+	fn decodes_arcana_skills() {
+		let mut body = bytes("11 56 00 00");
+		body.extend(810260001u32.to_le_bytes());
+		body.extend([1, 0, 0, 0, 0, 0, 0, 0, EQUIPPED_MARKER, 42]);
+		body.extend(bytes("00 00 00 00 00 00 00 00 00 00 00 00 02 00 00 00 00 00 00 00 01 0a 00 0a 00 00 00 00 00 03 70 b4 cb 00 01 a0 b8 c9 00 01 10 59 c8 00 02 03 70 b4 cb 00 00"));
+		let Some(Event::OwnEquipment { equipment }) = decode(&body) else {
+			panic!("arcane non décodée");
+		};
+		assert_eq!(equipment[0].skills, [SkillLevel { id: 13350000, level: 1 }, SkillLevel { id: 13220000, level: 1 }, SkillLevel { id: 13130000, level: 2 }]);
+	}
+
+	#[test]
+	fn decodes_perception() {
+		let body = bytes("00 90 e9 03 00 00 00 05 02 02 05 00 00 00 28 23 00 00 00 00 00 00 03 01 05 00 02 89 01 08 00 00 00 00 00 00 00 ff 01 02 8d 01 0b 00 00 00 00 00 00 00 02 03 38 00 09 00 00 00 00 00 00 00 ab 02 05 00 00 00 00 00 00 00 00 00 00 00 00 03 03 06 00 00 00 e4 25 00 00 00 00 00 00 03 01 06 00 02 91 01 07 00 00 00 00 00 00 00 01 03 64 00 0d 00 00 00 00 00 00 00");
+		let Some(Event::Perception { species }) = decode(&body) else {
+			panic!("perception non décodée");
+		};
+		assert_eq!(species.len(), 2);
+		assert_eq!((species[0].id, species[0].level, species[0].experience), (2, 5, 9000));
+		assert_eq!(species[0].effects, [Effect { grade: 2, stat: 393, value: 8 }, Effect { grade: 2, stat: 397, value: 11 }, Effect { grade: 3, stat: 56, value: 9 }]);
+		assert_eq!(species[1].effects, [Effect { grade: 2, stat: 401, value: 7 }, Effect { grade: 3, stat: 100, value: 13 }]);
+	}
 
 	fn roster_row(entity: u32, name: &str) -> Vec<u8> {
 		let mut row = vec![0x03, 0x04];

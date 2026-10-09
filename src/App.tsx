@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Castle, ChartLine, History, Lock, LockOpen, PictureInPicture2, RotateCcw, Users } from "lucide-react";
+import { Castle, ChartLine, History, Lock, LockOpen, PictureInPicture2, RotateCcw, Shirt, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BossBar } from "@/components/boss-bar";
 import { Board, Headline } from "@/components/board";
+import { Character } from "@/components/character";
 import { CopyButton } from "@/components/copy-button";
 import { Sessions } from "@/components/sessions";
 import { Timeline } from "@/components/timeline";
@@ -17,7 +18,7 @@ import { cn } from "@/lib/utils";
 export default function App() {
 	const t = useDictionary();
 	const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-	const [page, setPage] = useState<"live" | "history">("live");
+	const [page, setPage] = useState<"live" | "history" | "character">("live");
 	const [mode, setMode] = useState<Tab>("damage");
 	const [overlay, setOverlay] = useState<OverlayState>({ open: false, locked: false });
 	const [partyOnly, setPartyOnly] = useState(true);
@@ -41,6 +42,10 @@ export default function App() {
 		return <Sessions onBack={() => setPage("live")} />;
 	}
 
+	if (page === "character") {
+		return <Character onBack={() => setPage("live")} />;
+	}
+
 	return (
 		<main className="flex h-screen flex-col bg-background text-foreground select-none">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b px-3 text-sm">
@@ -62,6 +67,9 @@ export default function App() {
 				<CopyButton text={() => (snapshot ? summary(snapshot, null) : null)} />
 				<Button variant="ghost" size="icon-sm" title={t.header.history} onClick={() => setPage("history")}>
 					<History />
+				</Button>
+				<Button variant="ghost" size="icon-sm" title={t.header.character} onClick={() => setPage("character")}>
+					<Shirt />
 				</Button>
 				{overlay.open && (
 					<Button variant="ghost" size="icon-sm" title={overlay.locked ? t.header.unlockOverlays : t.header.lockOverlays} onClick={() => invoke("lock_overlay", { locked: !overlay.locked })}>

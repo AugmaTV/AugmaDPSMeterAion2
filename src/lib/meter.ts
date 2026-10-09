@@ -35,6 +35,60 @@ export type Uptime = {
 	active: number;
 };
 
+export type Stone = {
+	item: number;
+	stat: number;
+	rank: number;
+};
+
+export type Bond = {
+	stat: number;
+	value: number;
+};
+
+export type Gear = {
+	slot: number;
+	id: number;
+	enchant: number;
+	stones: Stone[];
+	bonds: Bond[];
+	godstone: number | null;
+	skills: SkillLevel[];
+};
+
+export type SkillLevel = {
+	id: number;
+	level: number;
+};
+
+export type Board = {
+	id: number;
+	nodes: number;
+	opened: number[];
+};
+
+export type Effect = {
+	grade: number;
+	stat: number;
+	value: number;
+};
+
+export type Species = {
+	id: number;
+	level: number;
+	experience: number;
+	effects: Effect[];
+};
+
+export type Profile = {
+	name: string;
+	class: number;
+	equipment: Gear[];
+	skillLevels: SkillLevel[];
+	daevanion: Board[];
+	perception: Species[];
+};
+
 export type Player = {
 	id: number;
 	name: string | null;

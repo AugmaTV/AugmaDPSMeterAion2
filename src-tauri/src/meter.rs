@@ -1,12 +1,17 @@
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 
 use serde::{Deserialize, Serialize};
 
-use crate::packet::{family, Event, Heal, Hit, Vitals as SpawnVitals};
+use crate::packet::{family, Board, Event, Gear, Heal, Hit, SkillLevel, Species, Vitals as SpawnVitals};
 
+const ITEM_CATEGORY: u32 = 100_000;
+const WEAPON_CATEGORIES: RangeInclusive<u32> = 1101..=1108;
+const WEAPON_GROUP: u32 = 1100;
+const BOARD_CLASSES: [u8; 9] = [0, 1, 2, 4, 3, 6, 5, 7, 8];
+const BOARD_INDEX: u32 = 10;
 const IDLE_MICROS: u64 = 15_000_000;
 const GRACE_MICROS: u64 = 2_000_000;
 const BOSS_HP: u64 = 1_000_000;
@@ -118,6 +123,24 @@ pub struct Player {
 	pub sources: Vec<Skill>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Profile {
+	pub name: String,
+	pub class: u8,
+	pub equipment: Vec<Gear>,
+	pub skill_levels: Vec<SkillLevel>,
+	pub daevanion: Vec<Board>,
+	pub perception: Vec<Species>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Profiles {
+	pub last: Option<String>,
+	pub characters: HashMap<String, Profile>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
@@ -188,6 +211,9 @@ pub struct Meter {
 	party: HashSet<u64>,
 	roster: HashSet<u64>,
 	profiles: HashMap<String, (u32, u64)>,
+	pending: Pending,
+	saved: Profiles,
+	profile_changed: bool,
 	party_only: bool,
 	dungeon: bool,
 	map: Option<u32>,
@@ -195,6 +221,14 @@ pub struct Meter {
 	encounter: Option<Encounter>,
 	history: Vec<Fight>,
 	closed: Vec<Vec<Fight>>,
+}
+
+#[derive(Default)]
+struct Pending {
+	equipment: Option<Vec<Gear>>,
+	skill_levels: Option<Vec<SkillLevel>>,
+	daevanion: Option<Vec<Board>>,
+	perception: Option<Vec<Species>>,
 }
 
 #[derive(Default)]
@@ -287,14 +321,19 @@ impl Meter {
 					}
 				}
 			}
-			Event::Character { entity, name, own } => {
+			Event::Character { entity, name, own, equipment } => {
 				if own {
 					self.own = Some(entity);
+					self.update_profile(entity, &name, &equipment);
 				}
 				self.spawned.remove(&entity);
 				self.owners.remove(&entity);
 				self.names.insert(entity, name);
 			}
+			Event::SkillLevels { levels } => self.pending.skill_levels = Some(levels),
+			Event::Daevanion { boards } => self.pending.daevanion = Some(boards),
+			Event::OwnEquipment { equipment } => self.pending.equipment = Some(equipment),
+			Event::Perception { species } => self.pending.perception = Some(species),
 			Event::Spawn { entity, owner, vitals } => self.spawn(entity, owner, vitals),
 			Event::Health { entity, hp } => self.health(micros, entity, hp),
 			Event::Despawn { entity, dead } => self.despawn(micros, entity, dead),
@@ -351,6 +390,27 @@ impl Meter {
 		self.own = None;
 		self.party.clear();
 		self.roster.clear();
+	}
+
+	pub fn profile(&self) -> Option<Profile> {
+		let name = self.own.and_then(|own| self.names.get(&own)).or(self.saved.last.as_ref())?;
+		let mut profile = self.saved.characters.get(name)?.clone();
+		if let Some(class) = self.own.map(|own| self.class_of(own)).filter(|class| *class != 0) {
+			profile.class = class;
+		}
+		Some(profile)
+	}
+
+	pub fn profiles(&self) -> &Profiles {
+		&self.saved
+	}
+
+	pub fn restore_profiles(&mut self, profiles: Profiles) {
+		self.saved = profiles;
+	}
+
+	pub fn take_profile_change(&mut self) -> bool {
+		mem::take(&mut self.profile_changed)
 	}
 
 	pub fn reset(&mut self) {
@@ -537,6 +597,31 @@ impl Meter {
 		if let Some(encounter) = &mut self.encounter {
 			*encounter.uptimes.entry(key).or_default() += closed.1.saturating_sub(closed.0.max(encounter.start));
 		}
+	}
+
+	fn update_profile(&mut self, entity: u64, name: &str, visible: &[Gear]) {
+		let class = self.class_of(entity);
+		let profile = self.saved.characters.entry(name.to_string()).or_insert_with(|| Profile { name: name.to_string(), ..Profile::default() });
+		if let Some(equipment) = self.pending.equipment.take() {
+			profile.equipment = equipment;
+		}
+		if let Some(levels) = self.pending.skill_levels.take() {
+			profile.skill_levels = levels;
+		}
+		if let Some(boards) = self.pending.daevanion.take() {
+			profile.daevanion = boards;
+		}
+		if let Some(species) = self.pending.perception.take() {
+			profile.perception = species;
+		}
+		merge_gear(&mut profile.equipment, visible);
+		if class != 0 {
+			profile.class = class;
+		} else if let Some(board) = profile.daevanion.first() {
+			profile.class = BOARD_CLASSES.get((board.id / BOARD_INDEX) as usize).copied().unwrap_or_default();
+		}
+		self.saved.last = Some(name.to_string());
+		self.profile_changed = true;
 	}
 
 	fn take(&mut self, micros: u64, hit: Hit) {
@@ -953,6 +1038,37 @@ fn spread(timeline: &mut Vec<u64>, other: &[u64], offset: u64) {
 	}
 }
 
+fn merge_gear(detailed: &mut Vec<Gear>, visible: &[Gear]) {
+	let mut used = vec![false; detailed.len()];
+	for gear in visible {
+		let same = (0..detailed.len()).find(|index| !used[*index] && detailed[*index].id == gear.id);
+		let similar = || (0..detailed.len()).find(|index| !used[*index] && gear_group(detailed[*index].id) == gear_group(gear.id));
+		match same.or_else(similar) {
+			Some(index) if detailed[index].id == gear.id => {
+				used[index] = true;
+				detailed[index].enchant = gear.enchant;
+			}
+			Some(index) => {
+				used[index] = true;
+				detailed[index] = Gear { slot: detailed[index].slot, ..gear.clone() };
+			}
+			None => {
+				used.push(true);
+				detailed.push(gear.clone());
+			}
+		}
+	}
+}
+
+fn gear_group(id: u32) -> u32 {
+	let category = id / ITEM_CATEGORY;
+	if WEAPON_CATEGORIES.contains(&category) {
+		WEAPON_GROUP
+	} else {
+		category
+	}
+}
+
 fn shifted(recaps: &[Recap], offset: u64) -> impl Iterator<Item = Recap> + '_ {
 	let delay = offset / 1000;
 	recaps.iter().map(move |recap| Recap { at: recap.at + delay, blows: recap.blows.iter().map(|blow| Blow { at: blow.at + delay, ..*blow }).collect() })
@@ -1035,7 +1151,7 @@ mod tests {
 	#[test]
 	fn aggregates_player_damage_and_summons() {
 		let mut meter = Meter::default();
-		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
 		meter.apply(0, Event::Spawn { entity: 50, owner: Some(2), vitals: None });
 		meter.apply(0, Event::Spawn { entity: 51, owner: None, vitals: None });
 		meter.apply(1_000_000, hit(900, 1, 14010353, 1000));
@@ -1137,10 +1253,27 @@ mod tests {
 	}
 
 	#[test]
+	fn keeps_own_profile_and_follows_visible_gear() {
+		let mut meter = Meter::default();
+		let detailed = vec![Gear { slot: 1, id: 110330049, enchant: 15, godstone: Some(19950007), ..Gear::default() }, Gear { slot: 3, id: 210330038, enchant: 10, ..Gear::default() }, Gear { slot: 13, id: 310330051, enchant: 10, ..Gear::default() }];
+		meter.apply(0, Event::OwnEquipment { equipment: detailed });
+		meter.apply(0, Event::Daevanion { boards: vec![Board { id: 41, nodes: 72, opened: vec![410001] }] });
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
+		let visible = vec![Gear { slot: 1, id: 110330049, enchant: 16, ..Gear::default() }, Gear { slot: 2, id: 210340031, enchant: 3, ..Gear::default() }];
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: visible });
+		let profile = meter.profile().unwrap();
+		assert!(meter.take_profile_change());
+		assert_eq!(profile.daevanion, [Board { id: 41, nodes: 72, opened: vec![410001] }]);
+		assert_eq!(profile.class, 3);
+		assert_eq!(profile.equipment.iter().map(|gear| (gear.slot, gear.id, gear.enchant)).collect::<Vec<_>>(), [(1, 110330049, 16), (3, 210340031, 3), (13, 310330051, 10)]);
+		assert_eq!(profile.equipment[0].godstone, Some(19950007));
+	}
+
+	#[test]
 	fn shows_only_self_and_party() {
 		let mut meter = Meter::default();
 		meter.set_party_only(true);
-		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
 		meter.apply(0, Event::PartyMember { entity: 2 });
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(0, hit(900, 2, 12020000, 50));
@@ -1154,7 +1287,7 @@ mod tests {
 	fn ignores_strangers_for_encounter_timing() {
 		let mut meter = Meter::default();
 		meter.set_party_only(true);
-		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(5_000_000, hit(900, 3, 13020000, 999));
 		meter.apply(IDLE_MICROS * 2, hit(901, 3, 13020000, 999));
@@ -1166,7 +1299,7 @@ mod tests {
 	fn keeps_members_after_party_disbands() {
 		let mut meter = Meter::default();
 		meter.set_party_only(true);
-		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
 		meter.apply(0, Event::PartyRoster { members: HashMap::from([(1, None), (2, None)]) });
 		meter.apply(0, hit(900, 1, 11020000, 100));
 		meter.apply(0, hit(900, 2, 12020000, 50));
@@ -1178,7 +1311,7 @@ mod tests {
 	fn removes_members_leaving_the_roster() {
 		let mut meter = Meter::default();
 		meter.set_party_only(true);
-		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
 		meter.apply(0, Event::PartyMember { entity: 4 });
 		meter.apply(0, Event::PartyRoster { members: HashMap::from([(1, None), (2, None), (3, None)]) });
 		meter.apply(0, Event::PartyRoster { members: HashMap::from([(1, None), (3, None)]) });
@@ -1200,7 +1333,7 @@ mod tests {
 	#[test]
 	fn attaches_profiles_by_name() {
 		let mut meter = Meter::default();
-		meter.apply(0, Event::Character { entity: 2, name: String::from("Alpha"), own: false });
+		meter.apply(0, Event::Character { entity: 2, name: String::from("Alpha"), own: false, equipment: Vec::new() });
 		meter.apply(0, Event::PartyProfiles { profiles: vec![Profile { name: String::from("Alpha"), gear: 1494, power: 72079 }] });
 		meter.apply(0, hit(900, 2, 12020000, 50));
 		let player = &meter.snapshot(Status::Live).players[0];

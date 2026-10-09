@@ -1,10 +1,18 @@
 # Third party notices
 
-AION 2, ses noms, textes, icônes et emblèmes de classe sont la propriété de NCSOFT Corporation. Augma DPS Meter n'est ni affilié, ni approuvé par NCSOFT. Les icônes de sorts sont chargées depuis le CDN officiel de NCSOFT et ne sont pas redistribuées.
+AION 2, ses noms, textes, icônes et emblèmes de classe sont la propriété de NCSOFT Corporation. Augma DPS Meter n'est ni affilié, ni approuvé par NCSOFT. Les icônes de sorts et d'objets sont chargées depuis le CDN officiel de NCSOFT et ne sont pas redistribuées.
 
 ## src/data/skills.json
 
 Noms et icônes des sorts issus de l'Armurerie officielle AION 2 (aion2.plaync.com).
+
+## src/data/items.json
+
+Noms, icônes et raretés des objets issus de l'Armurerie officielle AION 2 (aion2.plaync.com).
+
+## src/data/item-details.json, src/data/item-stats.json et src/data/daevanion.json
+
+Statistiques des objets, pierres, sets et plateaux Daevanion issus de l'Armurerie officielle AION 2 (aion2.plaync.com).
 
 ## src/data/skills-extra.json et src/data/npcs.json
 

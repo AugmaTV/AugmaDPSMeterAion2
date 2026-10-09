@@ -141,7 +141,7 @@ mod tests {
 
 	fn fights(start: u64) -> Vec<Fight> {
 		let mut meter = Meter::default();
-		meter.apply(start, Event::Character { entity: 1, name: String::from("Moi"), own: true });
+		meter.apply(start, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
 		meter.apply(start, Event::Hit(Hit { target: 900, actor: 1, skill: 11020000, damage: 1000, dot: false, drain: 0, ..Hit::default() }));
 		meter.apply(start + 2_000_000, Event::Hit(Hit { target: 900, actor: 1, skill: 11020000, damage: 1000, dot: false, drain: 0, ..Hit::default() }));
 		meter.session()

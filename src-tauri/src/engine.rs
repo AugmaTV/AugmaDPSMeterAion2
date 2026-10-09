@@ -1,5 +1,5 @@
 use crate::frame::Framer;
-use crate::meter::{Fight, Meter, Snapshot, Status};
+use crate::meter::{Fight, Meter, Profile, Profiles, Snapshot, Status};
 use crate::net;
 use crate::packet;
 use crate::stream::{Delivery, Stream};
@@ -53,6 +53,22 @@ impl Engine {
 
 	pub fn session(&self) -> Vec<Fight> {
 		self.meter.session()
+	}
+
+	pub fn profile(&self) -> Option<Profile> {
+		self.meter.profile()
+	}
+
+	pub fn profiles(&self) -> &Profiles {
+		self.meter.profiles()
+	}
+
+	pub fn restore_profiles(&mut self, profiles: Profiles) {
+		self.meter.restore_profiles(profiles);
+	}
+
+	pub fn take_profile_change(&mut self) -> bool {
+		self.meter.take_profile_change()
 	}
 
 	pub fn snapshot(&self, micros: u64) -> Snapshot {

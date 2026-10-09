@@ -7,6 +7,7 @@ pub mod npcap;
 pub mod packet;
 pub mod pcap;
 pub mod pktmon;
+mod profiles;
 mod reader;
 mod sessions;
 mod settings;
@@ -25,7 +26,7 @@ use tauri_plugin_window_state::StateFlags;
 
 use crate::capture::Source;
 use crate::engine::Engine;
-use crate::meter::{Meter, Status};
+use crate::meter::{Meter, Profile, Status};
 use crate::sessions::{Summary, View};
 use crate::settings::Settings;
 
@@ -47,6 +48,7 @@ static PARTY_ONLY: AtomicBool = AtomicBool::new(true);
 static DUNGEON: AtomicBool = AtomicBool::new(false);
 static EXITING: AtomicBool = AtomicBool::new(false);
 static OPENING: Mutex<()> = Mutex::new(());
+static PROFILE: Mutex<Option<Profile>> = Mutex::new(None);
 
 #[derive(Serialize, Clone)]
 struct OverlayState {
@@ -60,6 +62,11 @@ enum UpdateState {
 	Checking,
 	Downloading { version: String, progress: Option<u64> },
 	Installing { version: String },
+}
+
+#[command]
+fn profile(app: AppHandle) -> Option<Profile> {
+	PROFILE.lock().ok().and_then(|profile| profile.clone()).or_else(|| profiles::last(&app))
 }
 
 #[command]
@@ -155,7 +162,7 @@ pub fn run() {
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![reset, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, lock_session, delete_session])
+		.invoke_handler(generate_handler![reset, profile, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, lock_session, delete_session])
 		.on_window_event(|window, event| {
 			if !matches!(event, WindowEvent::Destroyed) {
 				return;
@@ -250,6 +257,7 @@ fn capture(app: AppHandle) {
 		};
 		let directory = sessions::directory(&app);
 		let mut engine = Engine::default();
+		engine.restore_profiles(profiles::load(&app));
 		let mut scanned = Instant::now();
 		let mut emitted = Instant::now();
 		let mut saved = Instant::now();
@@ -266,6 +274,14 @@ fn capture(app: AppHandle) {
 			}
 			if RESET.swap(false, Ordering::Relaxed) {
 				engine.reset();
+			}
+			if engine.take_profile_change() {
+				let _ = profiles::save(&app, engine.profiles());
+				let profile = engine.profile();
+				if let Ok(mut current) = PROFILE.lock() {
+					current.clone_from(&profile);
+				}
+				let _ = app.emit("profile", profile);
 			}
 			let closed = engine.closed();
 			if let Ok(directory) = &directory {

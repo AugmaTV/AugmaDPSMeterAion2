@@ -55,7 +55,10 @@ export function Overlay({ mode }: { mode: Mode }) {
 					<div key={player.id} className="relative flex h-6 shrink-0 items-center gap-1.5 overflow-hidden rounded-sm bg-white/5 px-1.5 text-xs">
 						<span className="absolute inset-y-0 left-0 opacity-40" style={{ width: `${(amount(player, mode) / top) * 100}%`, backgroundColor: CLASSES[player.class].color }} />
 						<ClassIcon gameClass={player.class} className="relative size-4" />
-						<span className={cn("relative flex-1 truncate", player.own && "font-semibold")}>{player.name ?? t.classes[player.class]}</span>
+						<span className="relative flex min-w-0 flex-1 items-center gap-1">
+							<span className={cn("truncate", player.own && "font-semibold")}>{player.name ?? t.classes[player.class]}</span>
+							{player.gear !== null && <span className="shrink-0 text-[10px] text-white/50 tabular-nums">GS {player.gear}</span>}
+						</span>
 						<span className="relative tabular-nums">{compact(rate(player, mode))}</span>
 						<span className="relative w-8 text-right text-white/60 tabular-nums">{percent(amount(player, mode), snapshot ? total(snapshot, mode) : 0)}</span>
 					</div>
