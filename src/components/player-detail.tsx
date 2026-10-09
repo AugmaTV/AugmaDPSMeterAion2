@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { ChevronLeft, Skull } from "lucide-react";
+import { ChevronDown, ChevronLeft, Skull } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClassIcon } from "@/components/class-icon";
 import { SkillIcon } from "@/components/skill-icon";
 import { CLASSES } from "@/lib/classes";
 import { compact, percent } from "@/lib/format";
-import { npcName, skillName, specialization } from "@/lib/game-data";
+import { npcName, skillName, specializations } from "@/lib/game-data";
 import { amount, rate, type Mode, type Player, type Skill, type Uptime } from "@/lib/meter";
+import { cn } from "@/lib/utils";
 
 const ENTRIES: Record<Mode, (player: Player) => Skill[]> = {
 	damage: (player) => player.skills,
@@ -62,23 +63,71 @@ function details(mode: Mode, entry: Skill) {
 	return mode === "damage" ? `${entry.casts} lanc.` : `${entry.hits} coups`;
 }
 
-function breakdown(mode: Mode, entry: Skill, duration: number) {
+function Tile({ title, value }: { title: string; value: string }) {
+	return (
+		<span className="flex flex-col rounded-md bg-background/60 px-2 py-1">
+			<span className="text-[10px] text-muted-foreground">{title}</span>
+			<span className="font-semibold">{value}</span>
+		</span>
+	);
+}
+
+function Meter({ title, part, total }: { title: string; part: number; total: number }) {
+	return (
+		<span className="flex items-center gap-2">
+			<span className="w-16 shrink-0 text-muted-foreground">{title}</span>
+			<span className="h-1.5 flex-1 overflow-hidden rounded-full bg-sky-400/15">
+				<span className="block h-full rounded-full bg-sky-400" style={{ width: `${total ? Math.min((part / total) * 100, 100) : 0}%` }} />
+			</span>
+			<span className="w-10 shrink-0 text-right font-semibold tabular-nums">{percent(part, total)}</span>
+		</span>
+	);
+}
+
+function SkillDetails({ mode, entry, duration }: { mode: Mode; entry: Skill; duration: number }) {
 	if (mode === "healing") {
-		return [`Utiles ${percent(entry.effective, entry.amount)}`, `Moy. ${compact(entry.amount / Math.max(entry.hits, 1))}`];
+		return (
+			<span className="flex flex-col gap-2 px-2 pb-2 text-xs">
+				<span className="grid grid-cols-2 gap-1.5">
+					<Tile title="Moyenne par soin" value={compact(entry.amount / Math.max(entry.hits, 1))} />
+					<Tile title="Soins" value={String(entry.hits)} />
+				</span>
+				<Meter title="Utiles" part={entry.effective} total={entry.amount} />
+			</span>
+		);
 	}
-	if (mode === "taken" || !entry.hits) {
-		return [];
-	}
-	return [
-		`Moy. ${compact(entry.amount / entry.hits)}`,
-		`Max ${compact(entry.max)}`,
-		`Crit ${percent(entry.crits, entry.hits)}`,
-		`Perfect ${percent(entry.perfect, entry.hits)}`,
-		`Puissant ${percent(entry.hard, entry.hits)}`,
-		`Dos ${percent(entry.back, entry.hits)}`,
-		`${(entry.casts / Math.max(duration / 60_000, 1 / 60)).toFixed(1)} lanc./min`,
-		specialization(entry.variants),
-	].filter((part): part is string => part !== null);
+	const { slots, tier } = specializations(entry.variants);
+	return (
+		<span className="flex flex-col gap-2 px-2 pb-2 text-xs">
+			<span className="grid grid-cols-4 gap-1.5">
+				<Tile title="Moyenne" value={compact(entry.amount / Math.max(entry.hits, 1))} />
+				<Tile title="Coup max" value={compact(entry.max)} />
+				<Tile title="Lancements" value={String(entry.casts)} />
+				<Tile title="Par minute" value={(entry.casts / Math.max(duration / 60_000, 1 / 60)).toFixed(1)} />
+			</span>
+			<span className="flex flex-col gap-1">
+				<Meter title="Critique" part={entry.crits} total={entry.hits} />
+				<Meter title="Perfect" part={entry.perfect} total={entry.hits} />
+				<Meter title="Puissant" part={entry.hard} total={entry.hits} />
+				<Meter title="Dos" part={entry.back} total={entry.hits} />
+			</span>
+			{(slots.length > 0 || tier > 0) && (
+				<span className="flex flex-wrap items-center gap-1">
+					<span className="mr-1 text-muted-foreground">Spécialisations</span>
+					{slots.map((slot) => (
+						<Badge key={slot} variant="secondary" className="h-4 px-1.5 text-[10px]">
+							Spé {slot}
+						</Badge>
+					))}
+					{tier > 0 && (
+						<Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+							Palier {tier}
+						</Badge>
+					)}
+				</span>
+			)}
+		</span>
+	);
 }
 
 function Uptimes({ title, uptimes, duration }: { title: string; uptimes: Uptime[]; duration: number }) {
@@ -184,9 +233,10 @@ export function PlayerDetail({ player, players, duration, mode, onBack }: { play
 				) : (
 					<>
 						{entries.map((entry) => {
-							const parts = expanded === entry.id ? breakdown(mode, entry, duration) : [];
+							const expandable = mode !== "taken" && entry.hits > 0;
+							const open = expandable && expanded === entry.id;
 							return (
-								<button key={entry.id} type="button" onClick={() => setExpanded(expanded === entry.id ? null : entry.id)} className="flex shrink-0 flex-col overflow-hidden rounded-md bg-muted/40 text-left text-sm">
+								<button key={entry.id} type="button" disabled={!expandable} onClick={() => setExpanded(open ? null : entry.id)} className="flex shrink-0 flex-col overflow-hidden rounded-md bg-muted/40 text-left text-sm">
 									<span className="relative flex h-8 w-full items-center gap-2 px-2">
 										<span className="absolute inset-y-0 left-0 opacity-25" style={{ width: `${(entry.amount / top) * 100}%`, backgroundColor: mode === "taken" ? "#fb7185" : color }} />
 										{mode === "taken" ? <Skull className="relative size-5 shrink-0 text-rose-400" /> : <SkillIcon id={entry.id} gameClass={player.class} />}
@@ -194,8 +244,9 @@ export function PlayerDetail({ player, players, duration, mode, onBack }: { play
 										<span className="relative w-14 text-right font-semibold tabular-nums">{compact(entry.amount)}</span>
 										<span className="relative w-10 text-right text-muted-foreground tabular-nums">{percent(entry.amount, total)}</span>
 										<span className="relative w-16 text-right text-xs text-muted-foreground tabular-nums">{details(mode, entry)}</span>
+										{expandable && <ChevronDown className={cn("relative size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />}
 									</span>
-									{parts.length > 0 && <span className="px-2 pb-1.5 text-xs text-muted-foreground tabular-nums">{parts.join(" · ")}</span>}
+									{open && <SkillDetails mode={mode} entry={entry} duration={duration} />}
 								</button>
 							);
 						})}

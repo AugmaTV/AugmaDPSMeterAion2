@@ -37,12 +37,10 @@ export function npcName(id: number | null) {
 	return id === null ? null : (NPCS[id] ?? null);
 }
 
-export function specialization(variants: number[]) {
+export function specializations(variants: number[]) {
 	const codes = variants.filter((variant) => variant >= CLASS_SKILLS_START && variant < CLASS_SKILLS_END);
-	const slots = [...new Set(codes.flatMap((code) => [...String(Math.floor((code % 10_000) / 10))].filter((slot) => slot !== "0")))].sort();
-	const tier = Math.max(0, ...codes.map((code) => code % 10));
-	if (slots.length === 0 && tier === 0) {
-		return null;
-	}
-	return [slots.length ? `Spé ${slots.join("·")}` : null, tier ? `palier ${tier}` : null].filter(Boolean).join(" · ");
+	return {
+		slots: [...new Set(codes.flatMap((code) => [...String(Math.floor((code % 10_000) / 10))].filter((slot) => slot !== "0")))].sort(),
+		tier: Math.max(0, ...codes.map((code) => code % 10)),
+	};
 }
