@@ -1,6 +1,7 @@
 import npcs from "@/data/npcs.json";
 import extra from "@/data/skills-extra.json";
 import official from "@/data/skills.json";
+import { dictionary, language } from "@/lib/i18n";
 
 type SkillEntry = {
 	fr?: string;
@@ -19,13 +20,13 @@ const CLASS_SKILLS_END = 20_000_000;
 
 export function skillName(id: number) {
 	if (id === DRAIN_SKILL) {
-		return "Vol de vie";
+		return dictionary().skills.drain;
 	}
 	if (id >= BASIC_ATTACK_START && id < BASIC_ATTACK_END) {
-		return "Attaque de base";
+		return dictionary().skills.basicAttack;
 	}
 	const entry = SKILLS[id];
-	return entry?.fr ?? entry?.en ?? `#${id}`;
+	return (language() === "fr" ? (entry?.fr ?? entry?.en) : (entry?.en ?? entry?.fr)) ?? `#${id}`;
 }
 
 export function skillIcon(id: number) {

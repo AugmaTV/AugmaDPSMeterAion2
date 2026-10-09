@@ -1,3 +1,5 @@
+import { language } from "@/lib/i18n";
+
 export function compact(value: number) {
 	if (value >= 1_000_000) {
 		return `${(value / 1_000_000).toFixed(2)}M`;
@@ -14,7 +16,7 @@ export function clock(millis: number) {
 }
 
 export function date(millis: number) {
-	return new Date(millis).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+	return new Date(millis).toLocaleString(language(), { dateStyle: "short", timeStyle: "short" });
 }
 
 export function percent(part: number, total: number) {

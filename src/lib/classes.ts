@@ -9,20 +9,19 @@ import sorcerer from "@/assets/classes/sorcerer.png";
 import templar from "@/assets/classes/templar.png";
 
 export type GameClass = {
-	name: string;
 	color: string;
 	icon: string | null;
 };
 
 export const CLASSES: GameClass[] = [
-	{ name: "Inconnu", color: "#737373", icon: null },
-	{ name: "Gladiateur", color: "#e0893a", icon: gladiator },
-	{ name: "Templier", color: "#5b8def", icon: templar },
-	{ name: "Assassin", color: "#b46ae0", icon: assassin },
-	{ name: "Rôdeur", color: "#7cc04f", icon: ranger },
-	{ name: "Sorcier", color: "#4fb7e0", icon: sorcerer },
-	{ name: "Élémentaliste", color: "#8f7cf0", icon: elementalist },
-	{ name: "Clerc", color: "#e8c94a", icon: cleric },
-	{ name: "Aède", color: "#3fbf9f", icon: chanter },
-	{ name: "Brawler", color: "#e05a5a", icon: brawler },
+	{ color: "#737373", icon: null },
+	{ color: "#e0893a", icon: gladiator },
+	{ color: "#5b8def", icon: templar },
+	{ color: "#b46ae0", icon: assassin },
+	{ color: "#7cc04f", icon: ranger },
+	{ color: "#4fb7e0", icon: sorcerer },
+	{ color: "#8f7cf0", icon: elementalist },
+	{ color: "#e8c94a", icon: cleric },
+	{ color: "#3fbf9f", icon: chanter },
+	{ color: "#e05a5a", icon: brawler },
 ];

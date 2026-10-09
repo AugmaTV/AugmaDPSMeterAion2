@@ -121,13 +121,6 @@ export const MODES: Mode[] = ["damage", "healing", "taken"];
 
 export const TABS: Tab[] = [...MODES, "deaths"];
 
-export const TITLES: Record<Tab, string> = {
-	damage: "Dégâts",
-	healing: "Soins",
-	taken: "Subis",
-	deaths: "Morts",
-};
-
 const AMOUNTS: Record<Mode, (player: Player) => number> = {
 	damage: (player) => player.damage,
 	healing: (player) => player.healing,

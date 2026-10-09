@@ -1,12 +1,14 @@
 import { Skull } from "lucide-react";
 import { compact } from "@/lib/format";
 import { npcName } from "@/lib/game-data";
+import { useDictionary } from "@/lib/i18n";
 import type { Boss } from "@/lib/meter";
 import { cn } from "@/lib/utils";
 
 export function BossBar({ boss, compactView = false }: { boss: Boss; compactView?: boolean }) {
+	const t = useDictionary();
 	const ratio = boss.dead ? 0 : Math.min(boss.hp / (boss.max || 1), 1);
-	const name = npcName(boss.npc) ?? "Cible";
+	const name = npcName(boss.npc) ?? t.boss;
 	return (
 		<div className={cn("flex shrink-0 flex-col gap-1", compactView ? "px-2 py-1 text-[11px]" : "border-b px-3 py-2 text-xs")}>
 			<div className="flex items-center gap-1.5">

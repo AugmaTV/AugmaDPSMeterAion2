@@ -7,6 +7,7 @@ import { SkillIcon } from "@/components/skill-icon";
 import { CLASSES } from "@/lib/classes";
 import { compact, percent } from "@/lib/format";
 import { npcName, skillName, specializations } from "@/lib/game-data";
+import { useDictionary, type Dictionary } from "@/lib/i18n";
 import { amount, rate, type Mode, type Player, type Skill, type Uptime } from "@/lib/meter";
 import { cn } from "@/lib/utils";
 
@@ -16,53 +17,53 @@ const ENTRIES: Record<Mode, (player: Player) => Skill[]> = {
 	taken: (player) => player.sources,
 };
 
-const STATS: Record<Mode, (player: Player, duration: number) => [string, string][]> = {
-	damage: (player, duration) => [
-		["Total", compact(player.damage)],
-		["DPS actif", `${compact(player.active ? (player.damage * 1000) / player.active : 0)}/s`],
-		["Actif", percent(player.active, duration)],
-		["Critique", percent(player.crits, player.hits)],
-		["Perfect", percent(player.perfect, player.hits)],
-		["Puissant", percent(player.hard, player.hits)],
-		["Dos", percent(player.back, player.hits)],
-		["Face", percent(player.front, player.hits)],
-		["Additionnels", percent(player.additional, player.hits)],
+const STATS: Record<Mode, (player: Player, duration: number, t: Dictionary) => [string, string][]> = {
+	damage: (player, duration, t) => [
+		[t.detail.total, compact(player.damage)],
+		[t.detail.activeDps, `${compact(player.active ? (player.damage * 1000) / player.active : 0)}/s`],
+		[t.detail.active, percent(player.active, duration)],
+		[t.detail.critical, percent(player.crits, player.hits)],
+		[t.detail.perfect, percent(player.perfect, player.hits)],
+		[t.detail.hard, percent(player.hard, player.hits)],
+		[t.detail.back, percent(player.back, player.hits)],
+		[t.detail.front, percent(player.front, player.hits)],
+		[t.detail.additional, percent(player.additional, player.hits)],
 	],
-	healing: (player) => [
-		["Total", compact(player.healing)],
-		["Soins", String(player.heals.reduce((sum, heal) => sum + heal.hits, 0))],
-		["Utiles", percent(player.effective, player.healing)],
-		["Surplus", compact(player.healing - player.effective)],
+	healing: (player, _, t) => [
+		[t.detail.total, compact(player.healing)],
+		[t.detail.heals, String(player.heals.reduce((sum, heal) => sum + heal.hits, 0))],
+		[t.detail.useful, percent(player.effective, player.healing)],
+		[t.detail.surplus, compact(player.healing - player.effective)],
 	],
-	taken: (player) => [
-		["Net", compact(player.taken)],
-		["Brut", compact(player.taken + player.absorbed)],
-		["Absorbé", percent(player.absorbed, player.taken + player.absorbed)],
-		["Coups reçus", String(player.takenHits)],
-		["Esquives", String(player.evasions)],
-		["Résistances", String(player.resists)],
-		["Parades", String(player.parries)],
-		["Blocages", String(player.blocks)],
-		["Perfect Block", String(player.perfectBlocks)],
-		["Mur de fer", String(player.ironWalls)],
+	taken: (player, _, t) => [
+		[t.detail.net, compact(player.taken)],
+		[t.detail.gross, compact(player.taken + player.absorbed)],
+		[t.detail.absorbed, percent(player.absorbed, player.taken + player.absorbed)],
+		[t.detail.takenHits, String(player.takenHits)],
+		[t.detail.evasions, String(player.evasions)],
+		[t.detail.resists, String(player.resists)],
+		[t.detail.parries, String(player.parries)],
+		[t.detail.blocks, String(player.blocks)],
+		[t.detail.perfectBlocks, String(player.perfectBlocks)],
+		[t.detail.ironWalls, String(player.ironWalls)],
 	],
 };
 
-function label(mode: Mode, entry: Skill) {
+function label(mode: Mode, entry: Skill, t: Dictionary) {
 	if (mode === "taken") {
-		return npcName(entry.id) ?? (entry.id ? `#${entry.id}` : "Inconnu");
+		return npcName(entry.id) ?? (entry.id ? `#${entry.id}` : t.detail.unknown);
 	}
 	return skillName(entry.id);
 }
 
-function details(mode: Mode, entry: Skill) {
+function details(mode: Mode, entry: Skill, t: Dictionary) {
 	if (mode === "healing") {
 		return `${entry.hits}×`;
 	}
 	if (!entry.hits) {
 		return "DoT";
 	}
-	return mode === "damage" ? `${entry.casts} lanc.` : `${entry.hits} coups`;
+	return mode === "damage" ? t.detail.castCount(entry.casts) : t.detail.hitCount(entry.hits);
 }
 
 function Tile({ title, value }: { title: string; value: string }) {
@@ -87,14 +88,15 @@ function Meter({ title, part, total }: { title: string; part: number; total: num
 }
 
 function SkillDetails({ mode, entry, duration }: { mode: Mode; entry: Skill; duration: number }) {
+	const t = useDictionary();
 	if (mode === "healing") {
 		return (
 			<span className="flex flex-col gap-2 px-2 pb-2 text-xs">
 				<span className="grid grid-cols-2 gap-1.5">
-					<Tile title="Moyenne par soin" value={compact(entry.amount / Math.max(entry.hits, 1))} />
-					<Tile title="Soins" value={String(entry.hits)} />
+					<Tile title={t.detail.averageHeal} value={compact(entry.amount / Math.max(entry.hits, 1))} />
+					<Tile title={t.detail.heals} value={String(entry.hits)} />
 				</span>
-				<Meter title="Utiles" part={entry.effective} total={entry.amount} />
+				<Meter title={t.detail.useful} part={entry.effective} total={entry.amount} />
 			</span>
 		);
 	}
@@ -102,28 +104,28 @@ function SkillDetails({ mode, entry, duration }: { mode: Mode; entry: Skill; dur
 	return (
 		<span className="flex flex-col gap-2 px-2 pb-2 text-xs">
 			<span className="grid grid-cols-4 gap-1.5">
-				<Tile title="Moyenne" value={compact(entry.amount / Math.max(entry.hits, 1))} />
-				<Tile title="Coup max" value={compact(entry.max)} />
-				<Tile title="Lancements" value={String(entry.casts)} />
-				<Tile title="Par minute" value={(entry.casts / Math.max(duration / 60_000, 1 / 60)).toFixed(1)} />
+				<Tile title={t.detail.average} value={compact(entry.amount / Math.max(entry.hits, 1))} />
+				<Tile title={t.detail.max} value={compact(entry.max)} />
+				<Tile title={t.detail.casts} value={String(entry.casts)} />
+				<Tile title={t.detail.perMinute} value={(entry.casts / Math.max(duration / 60_000, 1 / 60)).toFixed(1)} />
 			</span>
 			<span className="flex flex-col gap-1">
-				<Meter title="Critique" part={entry.crits} total={entry.hits} />
-				<Meter title="Perfect" part={entry.perfect} total={entry.hits} />
-				<Meter title="Puissant" part={entry.hard} total={entry.hits} />
-				<Meter title="Dos" part={entry.back} total={entry.hits} />
+				<Meter title={t.detail.critical} part={entry.crits} total={entry.hits} />
+				<Meter title={t.detail.perfect} part={entry.perfect} total={entry.hits} />
+				<Meter title={t.detail.hard} part={entry.hard} total={entry.hits} />
+				<Meter title={t.detail.back} part={entry.back} total={entry.hits} />
 			</span>
 			{(slots.length > 0 || tier > 0) && (
 				<span className="flex flex-wrap items-center gap-1">
-					<span className="mr-1 text-muted-foreground">Spécialisations</span>
+					<span className="mr-1 text-muted-foreground">{t.detail.specializations}</span>
 					{slots.map((slot) => (
 						<Badge key={slot} variant="secondary" className="h-4 px-1.5 text-[10px]">
-							Spé {slot}
+							{t.detail.specialization(slot)}
 						</Badge>
 					))}
 					{tier > 0 && (
 						<Badge variant="outline" className="h-4 px-1.5 text-[10px]">
-							Palier {tier}
+							{t.detail.tier(tier)}
 						</Badge>
 					)}
 				</span>
@@ -152,8 +154,9 @@ function Uptimes({ title, uptimes, duration }: { title: string; uptimes: Uptime[
 }
 
 function Comparison({ player, rival, mode, duration }: { player: Player; rival: Player; mode: Mode; duration: number }) {
-	const mine = STATS[mode](player, duration);
-	const theirs = STATS[mode](rival, duration);
+	const t = useDictionary();
+	const mine = STATS[mode](player, duration, t);
+	const theirs = STATS[mode](rival, duration, t);
 	const ids = [...new Set([...ENTRIES[mode](player), ...ENTRIES[mode](rival)].map((entry) => entry.id))];
 	const find = (target: Player, id: number) => ENTRIES[mode](target).find((entry) => entry.id === id)?.amount ?? 0;
 	ids.sort((a, b) => Math.max(find(player, b), find(rival, b)) - Math.max(find(player, a), find(rival, a)));
@@ -161,11 +164,11 @@ function Comparison({ player, rival, mode, duration }: { player: Player; rival: 
 		<div className="flex flex-col gap-1 text-xs">
 			<div className="grid grid-cols-[1fr_5rem_5rem] gap-2 border-b pb-1 font-semibold text-muted-foreground">
 				<span />
-				<span className="truncate text-right">{player.name ?? CLASSES[player.class].name}</span>
-				<span className="truncate text-right">{rival.name ?? CLASSES[rival.class].name}</span>
+				<span className="truncate text-right">{player.name ?? t.classes[player.class]}</span>
+				<span className="truncate text-right">{rival.name ?? t.classes[rival.class]}</span>
 			</div>
 			<div className="grid grid-cols-[1fr_5rem_5rem] gap-x-2 gap-y-1 tabular-nums">
-				<span className="text-muted-foreground">{mode === "damage" ? "DPS" : mode === "healing" ? "Soins/s" : "Subis/s"}</span>
+				<span className="text-muted-foreground">{t.detail.rates[mode]}</span>
 				<span className="text-right font-semibold">{compact(rate(player, mode))}</span>
 				<span className="text-right font-semibold">{compact(rate(rival, mode))}</span>
 				{mine.map(([name, value], index) => (
@@ -190,9 +193,10 @@ function Comparison({ player, rival, mode, duration }: { player: Player; rival: 
 }
 
 export function PlayerDetail({ player, players, duration, mode, onBack }: { player: Player; players: Player[]; duration: number; mode: Mode; onBack: () => void }) {
+	const t = useDictionary();
 	const [expanded, setExpanded] = useState<number | null>(null);
 	const [rivalId, setRivalId] = useState<number | null>(null);
-	const { name, color } = CLASSES[player.class];
+	const { color } = CLASSES[player.class];
 	const entries = ENTRIES[mode](player);
 	const total = amount(player, mode);
 	const top = entries[0]?.amount || 1;
@@ -204,27 +208,27 @@ export function PlayerDetail({ player, players, duration, mode, onBack }: { play
 					<ChevronLeft />
 				</Button>
 				<ClassIcon gameClass={player.class} />
-				<span className="truncate font-semibold">{player.name ?? name}</span>
-				{player.own && <Badge className="h-4 px-1 text-[10px]">MOI</Badge>}
+				<span className="truncate font-semibold">{player.name ?? t.classes[player.class]}</span>
+				{player.own && <Badge className="h-4 px-1 text-[10px]">{t.me}</Badge>}
 				{player.gear !== null && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">GS {player.gear} · CP {compact(player.power ?? 0)}</span>}
 				<span className="ml-auto text-sm tabular-nums">{compact(rate(player, mode))}/s</span>
 			</div>
 			<div className="grid shrink-0 grid-cols-3 gap-x-2 gap-y-1 border-b px-3 py-2 text-xs text-muted-foreground">
-				{STATS[mode](player, duration).map(([name, value]) => (
+				{STATS[mode](player, duration, t).map(([name, value]) => (
 					<span key={name}>
 						{name} <b className="text-foreground tabular-nums">{value}</b>
 					</span>
 				))}
 			</div>
 			<div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs text-muted-foreground">
-				<span>Comparer avec</span>
+				<span>{t.detail.compareWith}</span>
 				<select value={rivalId ?? ""} onChange={(event) => setRivalId(event.target.value ? Number(event.target.value) : null)} className="h-6 min-w-0 flex-1 rounded-md border bg-background px-1 text-foreground">
-					<option value="">Personne</option>
+					<option value="">{t.detail.nobody}</option>
 					{players
 						.filter((other) => other.id !== player.id)
 						.map((other) => (
 							<option key={other.id} value={other.id}>
-								{other.name ?? CLASSES[other.class].name}
+								{other.name ?? t.classes[other.class]}
 							</option>
 						))}
 				</select>
@@ -242,10 +246,10 @@ export function PlayerDetail({ player, players, duration, mode, onBack }: { play
 									<span className="relative flex h-8 w-full items-center gap-2 px-2">
 										<span className="absolute inset-y-0 left-0 opacity-25" style={{ width: `${(entry.amount / top) * 100}%`, backgroundColor: mode === "taken" ? "#fb7185" : color }} />
 										{mode === "taken" ? <Skull className="relative size-5 shrink-0 text-rose-400" /> : <SkillIcon id={entry.id} gameClass={player.class} />}
-										<span className="relative min-w-0 flex-1 truncate">{label(mode, entry)}</span>
+										<span className="relative min-w-0 flex-1 truncate">{label(mode, entry, t)}</span>
 										<span className="relative w-14 text-right font-semibold tabular-nums">{compact(entry.amount)}</span>
 										<span className="relative w-10 text-right text-muted-foreground tabular-nums">{percent(entry.amount, total)}</span>
-										<span className="relative w-16 text-right text-xs text-muted-foreground tabular-nums">{details(mode, entry)}</span>
+										<span className="relative w-16 text-right text-xs text-muted-foreground tabular-nums">{details(mode, entry, t)}</span>
 										{expandable && <ChevronDown className={cn("relative size-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />}
 									</span>
 									{open && <SkillDetails mode={mode} entry={entry} duration={duration} />}
@@ -254,8 +258,8 @@ export function PlayerDetail({ player, players, duration, mode, onBack }: { play
 						})}
 						{mode === "damage" && (
 							<div className="mt-2 flex flex-col gap-3">
-								<Uptimes title="Buffs reçus" uptimes={player.buffs} duration={duration} />
-								<Uptimes title="Debuffs sur la cible" uptimes={player.debuffs} duration={duration} />
+								<Uptimes title={t.detail.buffs} uptimes={player.buffs} duration={duration} />
+								<Uptimes title={t.detail.debuffs} uptimes={player.debuffs} duration={duration} />
 							</div>
 						)}
 					</>

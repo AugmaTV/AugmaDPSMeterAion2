@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Check, ClipboardCopy } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useDictionary } from "@/lib/i18n";
 
 export function CopyButton({ text }: { text: () => string | null }) {
+	const t = useDictionary();
 	const [copied, setCopied] = useState(false);
 
 	useEffect(() => {
@@ -21,7 +23,7 @@ export function CopyButton({ text }: { text: () => string | null }) {
 	};
 
 	return (
-		<Button variant="ghost" size="icon-sm" title={copied ? "Résumé copié" : "Copier le résumé pour Discord"} onClick={copy}>
+		<Button variant="ghost" size="icon-sm" title={copied ? t.header.copied : t.header.copy} onClick={copy}>
 			{copied ? <Check /> : <ClipboardCopy />}
 		</Button>
 	);

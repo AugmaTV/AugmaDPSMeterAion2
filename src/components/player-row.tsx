@@ -3,21 +3,23 @@ import { Badge } from "@/components/ui/badge";
 import { ClassIcon } from "@/components/class-icon";
 import { CLASSES } from "@/lib/classes";
 import { compact, percent } from "@/lib/format";
+import { useDictionary } from "@/lib/i18n";
 import { amount, rate, type Mode, type Player } from "@/lib/meter";
 
 export function PlayerRow({ player, mode, top, total, onSelect }: { player: Player; mode: Mode; top: number; total: number; onSelect: () => void }) {
-	const { name, color } = CLASSES[player.class];
+	const t = useDictionary();
+	const { color } = CLASSES[player.class];
 	const value = amount(player, mode);
 	return (
 		<button type="button" onClick={onSelect} className="relative flex h-9 shrink-0 items-center gap-2 overflow-hidden rounded-md bg-muted/40 px-2 text-left text-sm transition-colors hover:bg-muted">
 			<span className="absolute inset-y-0 left-0 opacity-30" style={{ width: `${(value / top) * 100}%`, backgroundColor: color }} />
 			<ClassIcon gameClass={player.class} className="relative" />
 			<span className="relative flex min-w-0 flex-1 items-center gap-1.5">
-				<span className="truncate font-medium">{player.name ?? name}</span>
-				{player.own && <Badge className="h-4 px-1 text-[10px]">MOI</Badge>}
+				<span className="truncate font-medium">{player.name ?? t.classes[player.class]}</span>
+				{player.own && <Badge className="h-4 px-1 text-[10px]">{t.me}</Badge>}
 				{player.gear !== null && <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">GS {player.gear}</span>}
 				{mode === "taken" && player.absorbed > 0 && (
-					<span className="flex shrink-0 items-center gap-0.5 text-[10px] text-sky-400 tabular-nums" title={`Brut ${compact(player.taken + player.absorbed)} · absorbé ${compact(player.absorbed)}`}>
+					<span className="flex shrink-0 items-center gap-0.5 text-[10px] text-sky-400 tabular-nums" title={t.detail.absorbedTitle(compact(player.taken + player.absorbed), compact(player.absorbed))}>
 						<ShieldHalf className="size-3" />
 						{percent(player.absorbed, player.taken + player.absorbed)}
 					</span>

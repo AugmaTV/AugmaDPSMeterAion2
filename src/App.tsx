@@ -9,11 +9,13 @@ import { CopyButton } from "@/components/copy-button";
 import { Sessions } from "@/components/sessions";
 import { Timeline } from "@/components/timeline";
 import { clock } from "@/lib/format";
+import { language, LANGUAGES, setLanguage, useDictionary } from "@/lib/i18n";
 import type { OverlayState, Snapshot, Tab } from "@/lib/meter";
 import { summary } from "@/lib/summary";
 import { cn } from "@/lib/utils";
 
 export default function App() {
+	const t = useDictionary();
 	const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
 	const [page, setPage] = useState<"live" | "history">("live");
 	const [mode, setMode] = useState<Tab>("damage");
@@ -48,36 +50,45 @@ export default function App() {
 				<span className="ml-auto font-semibold tabular-nums xl:invisible">
 					<Headline players={snapshot?.players ?? []} tab={mode} />
 				</span>
-				<Button variant={partyOnly ? "secondary" : "ghost"} size="icon-sm" title={partyOnly ? "Afficher tous les joueurs" : "Afficher seulement moi et mon groupe"} onClick={() => invoke("set_party_only", { enabled: !partyOnly }).then(() => setPartyOnly(!partyOnly))}>
+				<Button variant={partyOnly ? "secondary" : "ghost"} size="icon-sm" title={partyOnly ? t.header.allPlayers : t.header.partyOnly} onClick={() => invoke("set_party_only", { enabled: !partyOnly }).then(() => setPartyOnly(!partyOnly))}>
 					<Users />
 				</Button>
-				<Button variant={dungeon ? "secondary" : "ghost"} size="icon-sm" title={dungeon ? "Afficher seulement le combat en cours" : "Cumuler tous les combats du donjon"} onClick={() => invoke("set_dungeon", { enabled: !dungeon }).then(() => setDungeon(!dungeon))}>
+				<Button variant={dungeon ? "secondary" : "ghost"} size="icon-sm" title={dungeon ? t.header.currentFight : t.header.dungeon} onClick={() => invoke("set_dungeon", { enabled: !dungeon }).then(() => setDungeon(!dungeon))}>
 					<Castle />
 				</Button>
-				<Button variant={chart ? "secondary" : "ghost"} size="icon-sm" title={chart ? "Revenir aux listes" : "Courbe du combat"} onClick={() => setChart(!chart)}>
+				<Button variant={chart ? "secondary" : "ghost"} size="icon-sm" title={chart ? t.header.lists : t.header.chart} onClick={() => setChart(!chart)}>
 					<ChartLine />
 				</Button>
 				<CopyButton text={() => (snapshot ? summary(snapshot, null) : null)} />
-				<Button variant="ghost" size="icon-sm" title="Historique des sessions" onClick={() => setPage("history")}>
+				<Button variant="ghost" size="icon-sm" title={t.header.history} onClick={() => setPage("history")}>
 					<History />
 				</Button>
 				{overlay.open && (
-					<Button variant="ghost" size="icon-sm" title={overlay.locked ? "Déverrouiller les overlays (Ctrl+Shift+L)" : "Verrouiller les overlays (Ctrl+Shift+L)"} onClick={() => invoke("lock_overlay", { locked: !overlay.locked })}>
+					<Button variant="ghost" size="icon-sm" title={overlay.locked ? t.header.unlockOverlays : t.header.lockOverlays} onClick={() => invoke("lock_overlay", { locked: !overlay.locked })}>
 						{overlay.locked ? <Lock /> : <LockOpen />}
 					</Button>
 				)}
 				{mode !== "deaths" && (
-					<Button variant={overlay.open ? "secondary" : "ghost"} size="icon-sm" title="Ouvrir un overlay sur l'onglet actif" className="xl:hidden" onClick={() => invoke("open_overlay", { mode })}>
+					<Button variant={overlay.open ? "secondary" : "ghost"} size="icon-sm" title={t.header.openOverlay} className="xl:hidden" onClick={() => invoke("open_overlay", { mode })}>
 						<PictureInPicture2 />
 					</Button>
 				)}
-				<Button variant="ghost" size="icon-sm" title="Réinitialiser" onClick={() => invoke("reset")}>
+				<Button variant="ghost" size="icon-sm" title={t.header.reset} onClick={() => invoke("reset")}>
 					<RotateCcw />
 				</Button>
 			</header>
 			{snapshot?.boss && <BossBar boss={snapshot.boss} />}
 			{chart ? <Timeline snapshot={snapshot} /> : <Board snapshot={snapshot} mode={mode} onMode={setMode} onOverlay={(column) => invoke("open_overlay", { mode: column })} />}
-			<footer className="shrink-0 border-t px-3 py-1 text-[10px] text-muted-foreground">AION 2, noms et icônes © NCSOFT Corporation — projet non affilié à NCSOFT</footer>
+			<footer className="flex shrink-0 items-center gap-2 border-t px-3 py-1 text-[10px] text-muted-foreground">
+				<span className="truncate">{t.footer}</span>
+				<span className="ml-auto flex shrink-0 gap-0.5" title={t.language}>
+					{LANGUAGES.map((option) => (
+						<button key={option} type="button" onClick={() => setLanguage(option)} className={cn("rounded px-1.5 font-semibold uppercase transition-colors", option === language() ? "bg-secondary text-foreground" : "hover:text-foreground")}>
+							{option}
+						</button>
+					))}
+				</span>
+			</footer>
 		</main>
 	);
 }

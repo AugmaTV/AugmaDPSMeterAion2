@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { Button } from "@/components/ui/button";
-import { CLASSES } from "@/lib/classes";
 import { clock, compact } from "@/lib/format";
+import { useDictionary } from "@/lib/i18n";
 import type { Snapshot } from "@/lib/meter";
 
 const SERIES = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
@@ -44,6 +44,7 @@ function path(values: (number | null)[], x: (index: number) => number, y: (value
 }
 
 export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
+	const t = useDictionary();
 	const container = useRef<HTMLElement>(null);
 	const slots = useRef(new Map<number, number>());
 	const [width, setWidth] = useState(0);
@@ -70,11 +71,11 @@ export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
 	const series: Series[] = players
 		.filter((player) => slots.current.has(player.id))
 		.sort((a, b) => (slots.current.get(a.id) ?? 0) - (slots.current.get(b.id) ?? 0))
-		.map((player) => ({ key: String(player.id), name: player.name ?? CLASSES[player.class].name, color: SERIES[slots.current.get(player.id) ?? 0], values: smooth(player.timeline, length) }));
+		.map((player) => ({ key: String(player.id), name: player.name ?? t.classes[player.class], color: SERIES[slots.current.get(player.id) ?? 0], values: smooth(player.timeline, length) }));
 	const rest = players.filter((player) => !slots.current.has(player.id));
 	if (rest.length > 0) {
 		const merged = Array.from({ length }, (_, second) => rest.reduce((sum, player) => sum + (player.timeline[second] ?? 0), 0));
-		series.push({ key: "others", name: `Autres (${rest.length})`, color: OTHERS, values: smooth(merged, length) });
+		series.push({ key: "others", name: t.timeline.others(rest.length), color: OTHERS, values: smooth(merged, length) });
 	}
 	const health = Array.from({ length }, (_, second) => snapshot?.health[second] ?? null);
 	const top = ceiling(Math.max(0, ...series.flatMap((entry) => entry.values)));
@@ -93,7 +94,7 @@ export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
 
 	return (
 		<section ref={container} className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3 text-xs">
-			{length < 2 && <p className="m-auto p-4 text-sm text-muted-foreground">Pas encore assez de données pour tracer la courbe</p>}
+			{length < 2 && <p className="m-auto p-4 text-sm text-muted-foreground">{t.timeline.notEnough}</p>}
 			<div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1">
 				{series.map((entry) => (
 					<span key={entry.key} className="flex items-center gap-1.5 text-muted-foreground">
@@ -102,7 +103,7 @@ export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
 					</span>
 				))}
 				<Button variant="ghost" size="xs" className="ml-auto" onClick={() => setTable(!table)}>
-					{table ? "Graphique" : "Tableau"}
+					{table ? t.timeline.chart : t.timeline.table}
 				</Button>
 			</div>
 			{length < 2 ? null : table ? (
@@ -110,13 +111,13 @@ export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
 					<table className="w-full tabular-nums">
 						<thead className="text-muted-foreground">
 							<tr>
-								<th className="px-1 py-1 text-left font-medium">Temps</th>
+								<th className="px-1 py-1 text-left font-medium">{t.timeline.time}</th>
 								{series.map((entry) => (
 									<th key={entry.key} className="px-1 py-1 text-right font-medium">
 										{entry.name}
 									</th>
 								))}
-								<th className="px-1 py-1 text-right font-medium">Vie du boss</th>
+								<th className="px-1 py-1 text-right font-medium">{t.timeline.bossHealth}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -136,7 +137,7 @@ export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
 				</div>
 			) : (
 				<div className="relative shrink-0" onPointerMove={track} onPointerLeave={() => setHover(null)}>
-					<span className="font-semibold text-muted-foreground">DPS (moyenne sur {WINDOW} s)</span>
+					<span className="font-semibold text-muted-foreground">{t.timeline.dps(WINDOW)}</span>
 					<svg width={width} height={DPS_HEIGHT + AXIS} className="block overflow-visible">
 						{[0, top / 2, top].map((value) => (
 							<g key={value}>
@@ -156,7 +157,7 @@ export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
 						))}
 						{hover !== null && <line x1={x(hover)} x2={x(hover)} y1={PADDING} y2={DPS_HEIGHT} className="stroke-muted-foreground" strokeWidth={1} />}
 					</svg>
-					<span className="font-semibold text-muted-foreground">Vie du boss</span>
+					<span className="font-semibold text-muted-foreground">{t.timeline.bossHealth}</span>
 					<svg width={width} height={BOSS_HEIGHT} className="block overflow-visible">
 						{[0, 100].map((value) => (
 							<g key={value}>
@@ -183,7 +184,7 @@ export function Timeline({ snapshot }: { snapshot: Snapshot | null }) {
 								<span className="flex items-center gap-1.5">
 									<span className="h-0.5 w-3 shrink-0 rounded-full" style={{ backgroundColor: BOSS }} />
 									<b className="tabular-nums">{Math.round(health[hover] ?? 0)} %</b>
-									<span className="text-muted-foreground">Vie du boss</span>
+									<span className="text-muted-foreground">{t.timeline.bossHealth}</span>
 								</span>
 							)}
 						</div>
