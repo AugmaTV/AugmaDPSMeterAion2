@@ -33,3 +33,11 @@ jobs:
           releaseName: Augma DPS Meter v__VERSION__
           releaseDraft: false
           prerelease: false
+      - name: Upload stable installer name
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Copy-Item $installer.FullName AugmaDPSMeter-Setup.exe
+          gh release upload $env:GITHUB_REF_NAME AugmaDPSMeter-Setup.exe --clobber
