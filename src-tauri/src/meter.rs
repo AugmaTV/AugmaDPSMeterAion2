@@ -5,11 +5,12 @@ use std::ops::{Range, RangeInclusive};
 
 use serde::{Deserialize, Serialize};
 
-use crate::packet::{family, Board, Event, Gear, Heal, Hit, SkillLevel, Species, Vitals as SpawnVitals};
+use crate::packet::{family, Board, Event, Gear, Heal, Hit, Pet, SkillLevel, Species, Vitals as SpawnVitals};
 
 const ITEM_CATEGORY: u32 = 100_000;
 const WEAPON_CATEGORIES: RangeInclusive<u32> = 1101..=1108;
 const WEAPON_GROUP: u32 = 1100;
+const PET_THRESHOLDS: [u32; 3] = [5, 25, 75];
 const BOARD_CLASSES: [u8; 9] = [0, 1, 2, 4, 3, 6, 5, 7, 8];
 const BOARD_INDEX: u32 = 10;
 const IDLE_MICROS: u64 = 15_000_000;
@@ -132,6 +133,8 @@ pub struct Profile {
 	pub skill_levels: Vec<SkillLevel>,
 	pub daevanion: Vec<Board>,
 	pub perception: Vec<Species>,
+	pub pets: Vec<Pet>,
+	pub last_pet: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -229,6 +232,7 @@ struct Pending {
 	skill_levels: Option<Vec<SkillLevel>>,
 	daevanion: Option<Vec<Board>>,
 	perception: Option<Vec<Species>>,
+	pets: Option<Vec<Pet>>,
 }
 
 #[derive(Default)]
@@ -333,7 +337,11 @@ impl Meter {
 			Event::SkillLevels { levels } => self.pending.skill_levels = Some(levels),
 			Event::Daevanion { boards } => self.pending.daevanion = Some(boards),
 			Event::OwnEquipment { equipment } => self.pending.equipment = Some(equipment),
-			Event::Perception { species } => self.pending.perception = Some(species),
+			Event::Perception { species, pets } => {
+				self.pending.perception = Some(species);
+				self.pending.pets = Some(pets);
+			}
+			Event::PetGain { pet, amount } => self.gain_pet(pet, amount),
 			Event::Spawn { entity, owner, vitals } => self.spawn(entity, owner, vitals),
 			Event::Health { entity, hp } => self.health(micros, entity, hp),
 			Event::Despawn { entity, dead } => self.despawn(micros, entity, dead),
@@ -344,6 +352,9 @@ impl Meter {
 				}
 				if self.map != Some(map) || entry {
 					self.zone += 1;
+					if entry && self.map == Some(map) {
+						self.archive();
+					}
 				}
 				self.map = Some(map);
 			}
@@ -599,6 +610,28 @@ impl Meter {
 		}
 	}
 
+	fn gain_pet(&mut self, pet: u32, amount: u32) {
+		let Some(name) = self.own.and_then(|own| self.names.get(&own)).or(self.saved.last.as_ref()).cloned() else {
+			return;
+		};
+		let profile = self.saved.characters.entry(name.clone()).or_insert_with(|| Profile { name, ..Profile::default() });
+		if profile.pets.iter().all(|entry| entry.id != pet) {
+			profile.pets.push(Pet { id: pet, level: 0, progress: 0 });
+		}
+		if let Some(entry) = profile.pets.iter_mut().find(|entry| entry.id == pet) {
+			entry.progress += amount;
+			while let Some(threshold) = PET_THRESHOLDS.get(entry.level as usize).filter(|threshold| entry.progress >= **threshold) {
+				entry.progress -= threshold;
+				entry.level += 1;
+			}
+			if entry.level as usize >= PET_THRESHOLDS.len() {
+				entry.progress = 0;
+			}
+		}
+		profile.last_pet = Some(pet);
+		self.profile_changed = true;
+	}
+
 	fn update_profile(&mut self, entity: u64, name: &str, visible: &[Gear]) {
 		let class = self.class_of(entity);
 		let profile = self.saved.characters.entry(name.to_string()).or_insert_with(|| Profile { name: name.to_string(), ..Profile::default() });
@@ -613,6 +646,9 @@ impl Meter {
 		}
 		if let Some(species) = self.pending.perception.take() {
 			profile.perception = species;
+		}
+		if let Some(pets) = self.pending.pets.take() {
+			profile.pets = pets;
 		}
 		merge_gear(&mut profile.equipment, visible);
 		if class != 0 {
@@ -1267,6 +1303,32 @@ mod tests {
 		assert_eq!(profile.class, 3);
 		assert_eq!(profile.equipment.iter().map(|gear| (gear.slot, gear.id, gear.enchant)).collect::<Vec<_>>(), [(1, 110330049, 16), (3, 210340031, 3), (13, 310330051, 10)]);
 		assert_eq!(profile.equipment[0].godstone, Some(19950007));
+	}
+
+	#[test]
+	fn levels_up_pets_with_thresholds() {
+		let mut meter = Meter::default();
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Moi"), own: true, equipment: Vec::new() });
+		for _ in 0..7 {
+			meter.apply(0, Event::PetGain { pet: 1125, amount: 1 });
+		}
+		let pet = meter.profile().unwrap().pets[0];
+		assert_eq!((pet.level, pet.progress), (1, 2));
+		assert_eq!(meter.profile().unwrap().last_pet, Some(1125));
+	}
+
+	#[test]
+	fn resets_display_when_dungeon_is_relaunched_on_same_map() {
+		let mut meter = Meter::default();
+		meter.set_dungeon(true);
+		meter.apply(0, Event::MapChange { map: 600082, revive: false, entry: true });
+		meter.apply(0, hit(900, 1, 11020000, 100));
+		meter.apply(1_000_000, Event::MapChange { map: 600082, revive: false, entry: true });
+		let snapshot = meter.snapshot(Status::Live);
+		assert_eq!(snapshot.total, 0);
+		assert_eq!(meter.closed().len(), 1);
+		meter.apply(2_000_000, hit(901, 1, 11020000, 40));
+		assert_eq!(meter.snapshot(Status::Live).total, 40);
 	}
 
 	#[test]

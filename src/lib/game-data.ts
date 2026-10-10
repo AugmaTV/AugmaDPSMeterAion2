@@ -3,6 +3,7 @@ import itemDetails from "@/data/item-details.json";
 import itemStats from "@/data/item-stats.json";
 import items from "@/data/items.json";
 import npcs from "@/data/npcs.json";
+import pets from "@/data/pets.json";
 import extra from "@/data/skills-extra.json";
 import official from "@/data/skills.json";
 import { dictionary, language } from "@/lib/i18n";
@@ -83,7 +84,11 @@ const CLASS_SKILLS_START = 11_000_000;
 const CLASS_SKILLS_END = 20_000_000;
 const ITEM_CATEGORY = 100_000;
 const BOARD_INDEX = 10;
+const PETS: Record<string, { fr: string; en?: string; icon: string | null }> = pets;
+export const PET_THRESHOLDS = [5, 25, 75];
+export const PET_MAX_LEVEL = PET_THRESHOLDS.length;
 const SPECIES: Record<number, string> = { 2: "Intellia", 3: "Bestia", 4: "Natura", 5: "Varius", 6: "Singulia" };
+const SPECIES_EN: Record<number, string> = { 2: "Cogni", 3: "Fera", 4: "Natura", 5: "Varian", 6: "Special" };
 const GRADE_NAMES = ["Common", "Rare", "Legend", "Unique", "Epic"];
 const DAEVANION_BOARDS: Record<number, { name: string; total: number }> = {
 	1: { name: "Nezekan", total: 88 },
@@ -188,8 +193,22 @@ export function godstoneName(id: number) {
 	return entry ? (language() === "fr" ? (entry.fr ?? entry.en) : entry.en) : `#${id}`;
 }
 
+export function knownPets() {
+	return Object.keys(PETS).map(Number);
+}
+
+export function petName(id: number) {
+	const entry = PETS[id];
+	return entry ? (language() === "fr" ? entry.fr : (entry.en ?? entry.fr)) : `#${id}`;
+}
+
+export function petIcon(id: number) {
+	const icon = PETS[id]?.icon;
+	return icon ? `${ICON_URL}${icon}.png` : null;
+}
+
 export function speciesName(id: number) {
-	return SPECIES[id] ?? `#${id}`;
+	return (language() === "fr" ? SPECIES[id] : SPECIES_EN[id]) ?? `#${id}`;
 }
 
 export function gradeName(grade: number) {

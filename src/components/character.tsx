@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { ChevronLeft, Gem } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Gem } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ClassIcon } from "@/components/class-icon";
 import { GearIcon, gradeBorder, gradeText } from "@/components/gear-icon";
 import { SkillIcon } from "@/components/skill-icon";
-import { daevanionBoard, daevanionNodes, daevanionTotals, detailName, godstoneName, gradeName, itemDetail, itemGrade, itemName, itemOrder, itemSet, localized, localizedValue, nodeEffects, skillKnown, skillName, speciesName, statId, statName, statValue, stoneValue } from "@/lib/game-data";
+import { daevanionBoard, daevanionNodes, daevanionTotals, detailName, godstoneName, itemDetail, itemGrade, itemName, itemOrder, itemSet, localized, localizedValue, nodeEffects, skillKnown, skillName, speciesName, statId, statName, statValue, stoneValue } from "@/lib/game-data";
 import { language, useDictionary } from "@/lib/i18n";
 import type { Board, Gear, Profile, SkillLevel, Species } from "@/lib/meter";
 import { cn } from "@/lib/utils";
@@ -156,6 +156,13 @@ function Sets({ equipment }: { equipment: Gear[] }) {
 
 const CELLS = ["bg-violet-400", "bg-neutral-300", "bg-emerald-400", "bg-sky-400", "bg-amber-400", "bg-fuchsia-400"];
 
+const NODE_EFFECT = /^(.*?)\s*([+-]\d+(?:[.,]\d+)?%?)$/;
+
+function nodeLabel(effects: string[]) {
+	const match = NODE_EFFECT.exec(effects[0] ?? "");
+	return match ? { name: match[1], value: match[2] } : { name: effects[0] ?? "", value: "" };
+}
+
 function BoardMap({ board }: { board: Board }) {
 	const info = daevanionBoard(board.id);
 	const opened = new Set(board.opened);
@@ -171,8 +178,15 @@ function BoardMap({ board }: { board: Board }) {
 						key={node.id}
 						title={nodeEffects(node).join(" · ")}
 						style={{ gridRow: node.row, gridColumn: node.col }}
-						className={cn(node.type === "skill" ? "rounded-full" : "rounded-[1px]", opened.has(node.id) ? CELLS[node.grade] : "bg-white/10")}
-					/>
+						className={cn("flex flex-col items-center justify-center overflow-hidden text-center leading-none", node.type === "skill" ? "rounded-md" : "rounded-[2px]", opened.has(node.id) ? cn(CELLS[node.grade], "text-neutral-950") : "bg-white/5 text-white/30")}
+					>
+						{node.type === "start" ? null : (
+							<>
+								<span className="line-clamp-2 w-full px-px text-[8px] leading-[9px] font-medium break-words">{nodeLabel(nodeEffects(node)).name}</span>
+								<b className="text-[10px] tabular-nums">{nodeLabel(nodeEffects(node)).value}</b>
+							</>
+						)}
+					</span>
 				))}
 			</div>
 		</div>
@@ -187,8 +201,7 @@ function Daevanion({ boards }: { boards: Board[] }) {
 	const opened = boards.flatMap((board) => board.opened);
 	return (
 		<div className="flex flex-col gap-1.5 text-xs">
-			<span className="font-semibold text-muted-foreground">{t.detail.daevanion}</span>
-			<div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+			<div className="grid grid-cols-1 gap-2 2xl:grid-cols-2">
 				{boards.map((board) => (
 					<BoardMap key={board.id} board={board} />
 				))}
@@ -211,40 +224,68 @@ function Daevanion({ boards }: { boards: Board[] }) {
 	);
 }
 
-function Perception({ species }: { species: Species[] }) {
+const SLOT_COLORS = ["bg-neutral-400", "bg-emerald-400", "bg-sky-400", "bg-amber-400", "bg-fuchsia-400"];
+const SLOTS = 9;
+const SPECIES_WORDS = /\b(Intellia|Bestia|Natura|Varius|Singulia|Cogni|Fera|Varian|Special)\b/g;
+const EXPERIENCE_STEP = 10_000;
+
+function shortStat(name: string) {
+	return name.replace(SPECIES_WORDS, "").replace(/\s+/g, " ").trim();
+}
+
+export function Perception({ species }: { species: Species[] }) {
 	const t = useDictionary();
 	if (species.length === 0) {
 		return null;
 	}
 	return (
-		<div className="flex flex-col gap-1.5 text-xs">
-			<span className="font-semibold text-muted-foreground">{t.character.perception}</span>
+		<div className="grid gap-2 text-xs md:grid-cols-2">
 			{species.map((entry) => {
 				const totals = new Map<number, number>();
 				for (const effect of entry.effects) {
 					totals.set(effect.stat, (totals.get(effect.stat) ?? 0) + effect.value);
 				}
 				return (
-					<div key={entry.id} className="flex flex-col gap-1 rounded-md bg-muted/40 p-1.5">
+					<div key={entry.id} className="flex flex-col gap-2 rounded-md bg-muted/40 p-2">
 						<span className="flex items-center gap-2">
-							<span className="font-semibold">{speciesName(entry.id)}</span>
-							<span className="text-muted-foreground tabular-nums">{t.detail.level(entry.level)}</span>
-							<span className="ml-auto text-[10px] text-muted-foreground tabular-nums">{t.character.experience(entry.experience.toLocaleString(language()))}</span>
+							<span className="text-sm font-semibold">{speciesName(entry.id)}</span>
+							<span className="rounded bg-violet-500/20 px-1.5 text-violet-300 tabular-nums">{t.detail.level(entry.level)}</span>
+							<span className="ml-auto text-[10px] text-muted-foreground tabular-nums">
+								{entry.experience.toLocaleString(language())} / {EXPERIENCE_STEP.toLocaleString(language())}
+							</span>
+						</span>
+						<span className="h-1.5 w-full overflow-hidden rounded-full bg-sky-400/15">
+							<span className="block h-full rounded-full bg-sky-400" style={{ width: `${Math.min(100, (entry.experience / EXPERIENCE_STEP) * 100)}%` }} />
 						</span>
 						<span className="flex flex-wrap gap-1">
-							{entry.effects.map((effect, position) => (
-								<span key={position} className={cn("rounded border px-1 text-[10px]", gradeBorder(gradeName(effect.grade)), gradeText(gradeName(effect.grade)))}>
-									{statName(effect.stat)} <b className="tabular-nums">{statValue(effect.stat, effect.value)}</b>
+							{Array.from({ length: SLOTS }, (_, index) => {
+								const effect = entry.effects[index];
+								return (
+									<span
+										key={index}
+										title={effect ? `${statName(effect.stat)} ${statValue(effect.stat, effect.value)}` : t.character.locked(index + 1)}
+										className={cn("flex size-10 flex-col items-center justify-center rounded-full leading-none", effect ? cn(SLOT_COLORS[effect.grade - 1] ?? SLOT_COLORS[0], "text-neutral-950") : "border border-dashed border-white/20 text-[10px] text-white/30")}
+									>
+										{effect ? (
+											<>
+												<span className="line-clamp-2 w-9 text-center text-[7px] leading-[8px] font-medium break-words">{shortStat(statName(effect.stat))}</span>
+												<b className="text-[11px] tabular-nums">{statValue(effect.stat, effect.value)}</b>
+											</>
+										) : (
+											index + 1
+										)}
+									</span>
+								);
+							})}
+						</span>
+						<span className="flex flex-col gap-0.5">
+							{[...totals].map(([stat, value]) => (
+								<span key={stat} className="flex justify-between gap-2">
+									<span className="truncate text-muted-foreground">{statName(stat)}</span>
+									<b className="tabular-nums">+{statValue(stat, value)}</b>
 								</span>
 							))}
 						</span>
-						<Line title={t.character.total}>
-							{[...totals].map(([stat, value]) => (
-								<span key={stat}>
-									<span className="text-muted-foreground">{statName(stat)}</span> <b className="tabular-nums">{statValue(stat, value)}</b>
-								</span>
-							))}
-						</Line>
 					</div>
 				);
 			})}
@@ -260,8 +301,7 @@ function Skills({ levels, gameClass }: { levels: SkillLevel[]; gameClass: number
 	const sorted = levels.filter((skill) => skillKnown(skill.id)).sort((a, b) => b.level - a.level || skillName(a.id).localeCompare(skillName(b.id)));
 	return (
 		<div className="flex flex-col gap-1.5 text-xs">
-			<span className="font-semibold text-muted-foreground">{t.character.skills}</span>
-			<span className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+			<span className="flex flex-col gap-1">
 				{sorted.map((skill) => (
 					<span key={skill.id} className="flex h-8 items-center gap-2 rounded-md bg-muted/40 px-2">
 						<SkillIcon id={skill.id} gameClass={gameClass} />
@@ -274,7 +314,7 @@ function Skills({ levels, gameClass }: { levels: SkillLevel[]; gameClass: number
 	);
 }
 
-export function Character({ onBack }: { onBack: () => void }) {
+export function Character() {
 	const t = useDictionary();
 	const [profile, setProfile] = useState<Profile | null>(null);
 
@@ -289,11 +329,8 @@ export function Character({ onBack }: { onBack: () => void }) {
 	const sorted = [...(profile?.equipment ?? [])].sort((a, b) => itemOrder(a.id) - itemOrder(b.id));
 
 	return (
-		<main className="flex h-screen flex-col bg-background text-foreground select-none">
+		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b px-3 text-sm">
-				<Button variant="ghost" size="icon-sm" title={t.sessions.backToMeter} onClick={onBack}>
-					<ChevronLeft />
-				</Button>
 				<span className="font-semibold">{t.character.title}</span>
 				{profile && (
 					<span className="ml-auto flex min-w-0 items-center gap-1.5 text-muted-foreground">
@@ -305,19 +342,30 @@ export function Character({ onBack }: { onBack: () => void }) {
 			{sorted.length === 0 ? (
 				<p className="m-auto max-w-sm p-4 text-center text-sm text-muted-foreground">{t.character.empty}</p>
 			) : (
-				<section className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3 text-xs">
-					<div className="flex flex-col gap-1">
-						<span className="font-semibold text-muted-foreground">{t.detail.equipment}</span>
-						{sorted.map((gear, index) => (
-							<GearDetail key={index} gear={gear} />
-						))}
-						<Sets equipment={sorted} />
-					</div>
-					<Daevanion boards={profile?.daevanion ?? []} />
-					<Perception species={profile?.perception ?? []} />
-					<Skills levels={profile?.skillLevels ?? []} gameClass={profile?.class ?? 0} />
-				</section>
+				<Tabs defaultValue="equipment" className="flex min-h-0 flex-1 flex-col gap-0">
+					<TabsList className="mx-3 mt-2 w-auto shrink-0 self-start">
+						<TabsTrigger value="equipment">{t.detail.equipment}</TabsTrigger>
+						<TabsTrigger value="skills">{t.character.skills}</TabsTrigger>
+						<TabsTrigger value="daevanion">{t.detail.daevanion}</TabsTrigger>
+					</TabsList>
+					<TabsContent value="equipment" className="min-h-0 flex-1 overflow-y-auto p-3 text-xs">
+						<div className="grid items-start gap-1.5 lg:grid-cols-2">
+							{sorted.map((gear, index) => (
+								<GearDetail key={index} gear={gear} />
+							))}
+							<div className="lg:col-span-2">
+								<Sets equipment={sorted} />
+							</div>
+						</div>
+					</TabsContent>
+					<TabsContent value="skills" className="min-h-0 flex-1 overflow-y-auto p-3 text-xs">
+						<Skills levels={profile?.skillLevels ?? []} gameClass={profile?.class ?? 0} />
+					</TabsContent>
+					<TabsContent value="daevanion" className="min-h-0 flex-1 overflow-y-auto p-3 text-xs">
+						<Daevanion boards={profile?.daevanion ?? []} />
+					</TabsContent>
+				</Tabs>
 			)}
-		</main>
+		</div>
 	);
 }

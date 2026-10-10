@@ -80,6 +80,12 @@ export type Species = {
 	effects: Effect[];
 };
 
+export type Pet = {
+	id: number;
+	level: number;
+	progress: number;
+};
+
 export type Profile = {
 	name: string;
 	class: number;
@@ -87,6 +93,8 @@ export type Profile = {
 	skillLevels: SkillLevel[];
 	daevanion: Board[];
 	perception: Species[];
+	pets: Pet[];
+	lastPet: number | null;
 };
 
 export type Player = {

@@ -16,7 +16,7 @@ function title(session: SessionSummary, t: Dictionary) {
 	return session.name ?? npcName(session.boss) ?? t.sessions.openWorld;
 }
 
-export function Sessions({ onBack }: { onBack: () => void }) {
+export function Sessions() {
 	const t = useDictionary();
 	const [sessions, setSessions] = useState<SessionSummary[]>([]);
 	const [opened, setOpened] = useState<SessionSummary | null>(null);
@@ -49,11 +49,8 @@ export function Sessions({ onBack }: { onBack: () => void }) {
 	}
 
 	return (
-		<main className="flex h-screen flex-col bg-background text-foreground select-none">
+		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b px-3 text-sm">
-				<Button variant="ghost" size="icon-sm" title={t.sessions.backToMeter} onClick={onBack}>
-					<ChevronLeft />
-				</Button>
 				<span className="font-semibold">{t.sessions.title}</span>
 				<span className="ml-auto text-muted-foreground tabular-nums">{t.sessions.count(sessions.length)}</span>
 			</header>
@@ -110,7 +107,7 @@ export function Sessions({ onBack }: { onBack: () => void }) {
 					</div>
 				))}
 			</section>
-		</main>
+		</div>
 	);
 }
 
@@ -126,7 +123,7 @@ function SessionPage({ session, onBack }: { session: SessionSummary; onBack: () 
 	}, [session.id, fight]);
 
 	return (
-		<main className="flex h-screen flex-col bg-background text-foreground select-none">
+		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b px-3 text-sm">
 				<Button variant="ghost" size="icon-sm" title={t.sessions.backToHistory} onClick={onBack}>
 					<ChevronLeft />
@@ -153,7 +150,7 @@ function SessionPage({ session, onBack }: { session: SessionSummary; onBack: () 
 			</div>
 			{view?.snapshot.boss && <BossBar boss={view.snapshot.boss} />}
 			{chart ? <Timeline snapshot={view?.snapshot ?? null} /> : <Board snapshot={view?.snapshot ?? null} mode={mode} onMode={setMode} />}
-		</main>
+		</div>
 	);
 }
 
@@ -174,7 +171,7 @@ function SessionCompare({ sessions, onBack }: { sessions: SessionSummary[]; onBa
 	const names = [...new Set(views.flatMap((view) => (view?.snapshot.players ?? []).map((player) => identity(player, t))))].sort((a, b) => Math.max(dps(0, b), dps(1, b)) - Math.max(dps(0, a), dps(1, a)));
 
 	return (
-		<main className="flex h-screen flex-col bg-background text-foreground select-none">
+		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b px-3 text-sm">
 				<Button variant="ghost" size="icon-sm" title={t.sessions.backToHistory} onClick={onBack}>
 					<ChevronLeft />
@@ -227,6 +224,6 @@ function SessionCompare({ sessions, onBack }: { sessions: SessionSummary[]; onBa
 					})}
 				</div>
 			</section>
-		</main>
+		</div>
 	);
 }

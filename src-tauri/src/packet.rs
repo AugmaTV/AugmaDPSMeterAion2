@@ -24,6 +24,11 @@ const SKILL_LEVELS: [u8; 2] = [0x00, 0x51];
 const DAEVANION: [u8; 2] = [0x26, 0xE2];
 const OWN_EQUIPMENT: [u8; 2] = [0x11, 0x56];
 const PETS: [u8; 2] = [0x00, 0x90];
+const PET_GAIN: [u8; 2] = [0x0D, 0x90];
+const PET_ENTRY: usize = 12;
+const PET_PROGRESS: usize = 8;
+const PET_LEVELS: RangeInclusive<u32> = 0..=10;
+const PET_IDS: Range<u32> = 1000..2000;
 const PARENT_MARKER: [u8; 8] = [0xFF; 8];
 const ZONE_FLAG: u8 = 0x01;
 const ZONE_POSITION: Range<usize> = 2..14;
@@ -127,7 +132,8 @@ pub enum Event {
 	SkillLevels { levels: Vec<SkillLevel> },
 	Daevanion { boards: Vec<Board> },
 	OwnEquipment { equipment: Vec<Gear> },
-	Perception { species: Vec<Species> },
+	Perception { species: Vec<Species>, pets: Vec<Pet> },
+	PetGain { pet: u32, amount: u32 },
 	Spawn { entity: u64, owner: Option<u64>, vitals: Option<Vitals> },
 	Health { entity: u64, hp: u64 },
 	Despawn { entity: u64, dead: bool },
@@ -186,6 +192,14 @@ pub struct Stone {
 	pub item: u32,
 	pub stat: u16,
 	pub rank: u8,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
+pub struct Pet {
+	pub id: u32,
+	pub level: u32,
+	#[serde(default)]
+	pub progress: u32,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -264,6 +278,7 @@ pub fn decode(body: &[u8]) -> Option<Event> {
 		DAEVANION => daevanion(&mut reader),
 		OWN_EQUIPMENT => own_equipment(reader.rest()),
 		PETS => perception(reader.rest()),
+		PET_GAIN => pet_gain(&mut reader),
 		BUFF_APPLY => buff(&mut reader, true),
 		BUFF_REFRESH => buff(&mut reader, false),
 		opcode if PARTY_MEMBERS.contains(&opcode) => Some(Event::PartyMember { entity: reader.varint()? }),
@@ -428,7 +443,49 @@ fn perception(data: &[u8]) -> Option<Event> {
 	}
 	let ends = headers.iter().skip(1).copied().chain([data.len()]);
 	let species: Vec<Species> = headers.iter().zip(ends).map(|(start, end)| species_block(&data[*start..end])).collect();
-	(!species.is_empty()).then_some(Event::Perception { species })
+	(!species.is_empty()).then_some(Event::Perception { species, pets: pets(data) })
+}
+
+fn pets(data: &[u8]) -> Vec<Pet> {
+	let Some(count) = data.get(4).copied().map(usize::from) else {
+		return Vec::new();
+	};
+	let list = data.get(5..5 + count * PET_ENTRY).unwrap_or_default();
+	let rest = data.get(5 + count * PET_ENTRY..).unwrap_or_default();
+	let progress: Vec<(u32, u32)> = match rest.split_first() {
+		Some((length, entries)) => entries
+			.as_chunks::<PET_PROGRESS>()
+			.0
+			.iter()
+			.take(usize::from(*length))
+			.map(|entry| (u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]), u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]])))
+			.collect(),
+		None => Vec::new(),
+	};
+	let mut pets: Vec<Pet> = list
+		.as_chunks::<PET_ENTRY>()
+		.0
+		.iter()
+		.filter_map(|entry| {
+			let id = u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]);
+			let level = u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]);
+			let progress = progress.iter().find(|(other, _)| *other == id).map_or(0, |(_, value)| *value);
+			(PET_IDS.contains(&id) && PET_LEVELS.contains(&level)).then_some(Pet { id, level, progress })
+		})
+		.collect();
+	for (id, value) in &progress {
+		if PET_IDS.contains(id) && pets.iter().all(|pet| pet.id != *id) {
+			pets.push(Pet { id: *id, level: 0, progress: *value });
+		}
+	}
+	pets
+}
+
+fn pet_gain(reader: &mut Reader) -> Option<Event> {
+	reader.u8()?;
+	let pet = reader.u32()?;
+	let amount = reader.u32()?;
+	(PET_IDS.contains(&pet) && (1..=100).contains(&amount)).then_some(Event::PetGain { pet, amount })
 }
 
 fn species_header(data: &[u8], position: usize) -> bool {
@@ -842,13 +899,23 @@ mod tests {
 	#[test]
 	fn decodes_perception() {
 		let body = bytes("00 90 e9 03 00 00 00 05 02 02 05 00 00 00 28 23 00 00 00 00 00 00 03 01 05 00 02 89 01 08 00 00 00 00 00 00 00 ff 01 02 8d 01 0b 00 00 00 00 00 00 00 02 03 38 00 09 00 00 00 00 00 00 00 ab 02 05 00 00 00 00 00 00 00 00 00 00 00 00 03 03 06 00 00 00 e4 25 00 00 00 00 00 00 03 01 06 00 02 91 01 07 00 00 00 00 00 00 00 01 03 64 00 0d 00 00 00 00 00 00 00");
-		let Some(Event::Perception { species }) = decode(&body) else {
+		let Some(Event::Perception { species, .. }) = decode(&body) else {
 			panic!("perception non décodée");
 		};
 		assert_eq!(species.len(), 2);
 		assert_eq!((species[0].id, species[0].level, species[0].experience), (2, 5, 9000));
 		assert_eq!(species[0].effects, [Effect { grade: 2, stat: 393, value: 8 }, Effect { grade: 2, stat: 397, value: 11 }, Effect { grade: 3, stat: 56, value: 9 }]);
 		assert_eq!(species[1].effects, [Effect { grade: 2, stat: 401, value: 7 }, Effect { grade: 3, stat: 100, value: 13 }]);
+	}
+
+	#[test]
+	fn decodes_pets() {
+		let body = bytes("00 90 e9 03 00 00 02 e9 03 00 00 e9 03 00 00 03 00 00 00 65 04 00 00 65 04 00 00 01 00 00 00 01 65 04 00 00 07 00 00 00 05 02 02 05 00 00 00 28 23 00 00 00 00 00 00 03 01 05 00 02 89 01 08 00 00 00 00 00 00 00");
+		let Some(Event::Perception { pets, .. }) = decode(&body) else {
+			panic!("familiers non décodés");
+		};
+		assert_eq!(pets, [Pet { id: 1001, level: 3, progress: 0 }, Pet { id: 1125, level: 1, progress: 7 }]);
+		assert_eq!(decode(&bytes("0d 90 01 65 04 00 00 01 00 00 00")), Some(Event::PetGain { pet: 1125, amount: 1 }));
 	}
 
 	fn roster_row(entity: u32, name: &str) -> Vec<u8> {
