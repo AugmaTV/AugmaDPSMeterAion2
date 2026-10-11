@@ -84,7 +84,7 @@ const CLASS_SKILLS_START = 11_000_000;
 const CLASS_SKILLS_END = 20_000_000;
 const ITEM_CATEGORY = 100_000;
 const BOARD_INDEX = 10;
-const PETS: Record<string, { fr: string; en?: string; icon: string | null }> = pets;
+const PETS: Record<string, { fr: string; en?: string; icon: string | null; genus?: number }> = pets;
 export const PET_THRESHOLDS = [5, 25, 75];
 export const PET_MAX_LEVEL = PET_THRESHOLDS.length;
 const SPECIES: Record<number, string> = { 2: "Intellia", 3: "Bestia", 4: "Natura", 5: "Varius", 6: "Singulia" };
@@ -195,6 +195,10 @@ export function godstoneName(id: number) {
 
 export function knownPets() {
 	return Object.keys(PETS).map(Number);
+}
+
+export function petGenus(id: number) {
+	return PETS[id]?.genus ?? null;
 }
 
 export function petName(id: number) {

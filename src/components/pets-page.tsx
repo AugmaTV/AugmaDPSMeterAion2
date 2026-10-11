@@ -6,11 +6,13 @@ import { Perception } from "@/components/character";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PetIcon } from "@/components/pet-icon";
-import { knownPets, PET_MAX_LEVEL, PET_THRESHOLDS, petName } from "@/lib/game-data";
+import { knownPets, PET_MAX_LEVEL, PET_THRESHOLDS, petGenus, petName, speciesName } from "@/lib/game-data";
 import { useDictionary } from "@/lib/i18n";
 import type { Pet, Profile } from "@/lib/meter";
 import { toggleTrackedPet, useTrackedPets } from "@/lib/tracking";
 import { cn } from "@/lib/utils";
+
+const GENUS = [2, 3, 4, 5, 6];
 
 function Card({ pet, tracked, last }: { pet: Pet; tracked: boolean; last: boolean }) {
 	const t = useDictionary();
@@ -60,6 +62,8 @@ export function Pets() {
 	const missing = knownPets().filter((id) => !received.has(id)).map((id): Pet => ({ id, level: 0, progress: 0 }));
 	const pets = [...(profile?.pets ?? []), ...missing].sort((a, b) => b.level - a.level || b.progress - a.progress || petName(a.id).localeCompare(petName(b.id)));
 	const owned = pets.filter((pet) => pet.level > 0).length;
+	const groups = [...GENUS, null].map((genus) => ({ genus, pets: pets.filter((pet) => (petGenus(pet.id) ?? null) === genus) })).filter((group) => group.pets.length > 0);
+	const species = new Map((profile?.perception ?? []).map((entry) => [entry.id, entry]));
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
@@ -81,11 +85,24 @@ export function Pets() {
 					{pets.length === 0 ? (
 						<p className="m-auto max-w-sm p-4 text-center text-sm text-muted-foreground">{t.character.empty}</p>
 					) : (
-						<section className="grid grid-cols-2 content-start gap-2 p-3 md:grid-cols-3 xl:grid-cols-4">
-							{pets.map((pet) => (
-								<Card key={pet.id} pet={pet} tracked={tracked.includes(pet.id)} last={profile?.lastPet === pet.id} />
+						<div className="flex flex-col gap-4 p-3">
+							{groups.map((group) => (
+								<section key={group.genus ?? "other"} className="flex flex-col gap-2">
+									<span className="flex items-center gap-2 text-sm font-semibold">
+										{group.genus === null ? t.character.otherPets : speciesName(group.genus)}
+										{group.genus !== null && species.has(group.genus) && <span className="rounded bg-violet-500/20 px-1.5 text-xs font-normal text-violet-300">{t.detail.level(species.get(group.genus)?.level ?? 0)}</span>}
+										<span className="text-xs font-normal text-muted-foreground tabular-nums">
+											{group.pets.filter((pet) => pet.level > 0).length}/{group.pets.length}
+										</span>
+									</span>
+									<div className="grid grid-cols-2 content-start gap-2 md:grid-cols-3 xl:grid-cols-4">
+										{group.pets.map((pet) => (
+											<Card key={pet.id} pet={pet} tracked={tracked.includes(pet.id)} last={profile?.lastPet === pet.id} />
+										))}
+									</div>
+								</section>
 							))}
-						</section>
+						</div>
 					)}
 				</TabsContent>
 				<TabsContent value="perception" className="min-h-0 flex-1 overflow-y-auto p-3 text-xs">
