@@ -101,6 +101,13 @@ const fr = {
 		debuffs: "Debuffs sur la cible",
 	},
 	boss: "Cible",
+	sync: {
+		title: "Synchronisation",
+		sources: { character: "Équipement visible", equipment: "Équipement complet", skills: "Compétences", daevanion: "Daevanion", pets: "Familiers et perception" },
+		none: "Rien reçu",
+		unreadable: "illisible",
+		hint: "Rien n'a été reçu depuis le lancement du meter. Lance le meter avant le jeu, ou reconnecte-toi (sélection de personnage, puis entrée dans le monde).",
+	},
 	character: {
 		title: "Mon personnage",
 		empty: "Ton équipement complet s'affichera à ta prochaine connexion (sélection de personnage, puis entrée dans le monde) avec le meter lancé. Il sera ensuite gardé d'un lancement à l'autre.",
@@ -267,6 +274,13 @@ const en: Dictionary = {
 		debuffs: "Debuffs on target",
 	},
 	boss: "Target",
+	sync: {
+		title: "Synchronization",
+		sources: { character: "Visible gear", equipment: "Full equipment", skills: "Skills", daevanion: "Daevanion", pets: "Pets and perception" },
+		none: "Nothing received",
+		unreadable: "unreadable",
+		hint: "Nothing has been received since the meter started. Start the meter before the game, or log in again (character select, then entering the world).",
+	},
 	character: {
 		title: "My character",
 		empty: "Your full equipment will show up at your next login (character select, then entering the world) while the meter is running. It is then kept between launches.",

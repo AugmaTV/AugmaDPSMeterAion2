@@ -6,6 +6,7 @@ import { Perception } from "@/components/character";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PetIcon } from "@/components/pet-icon";
+import { SyncStatus } from "@/components/sync-status";
 import { knownPets, PET_MAX_LEVEL, PET_THRESHOLDS, petGenus, petName, speciesName } from "@/lib/game-data";
 import { useDictionary } from "@/lib/i18n";
 import type { Pet, Profile } from "@/lib/meter";
@@ -86,6 +87,7 @@ export function Pets() {
 						<p className="m-auto max-w-sm p-4 text-center text-sm text-muted-foreground">{t.character.empty}</p>
 					) : (
 						<div className="flex flex-col gap-4 p-3">
+							{received.size === 0 && <SyncStatus />}
 							{groups.map((group) => (
 								<section key={group.genus ?? "other"} className="flex flex-col gap-2">
 									<span className="flex items-center gap-2 text-sm font-semibold">

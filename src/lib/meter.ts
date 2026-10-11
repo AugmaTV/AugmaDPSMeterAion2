@@ -86,6 +86,13 @@ export type Pet = {
 	progress: number;
 };
 
+export type Diagnostic = {
+	count: number;
+	size: number;
+	decoded: boolean;
+	items: number;
+};
+
 export type Profile = {
 	name: string;
 	class: number;
