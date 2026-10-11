@@ -13,7 +13,6 @@ mod sessions;
 mod settings;
 pub mod stream;
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::thread;
@@ -26,7 +25,7 @@ use tauri_plugin_updater::UpdaterExt;
 use tauri_plugin_window_state::StateFlags;
 
 use crate::capture::Source;
-use crate::engine::{Diagnostic, Engine};
+use crate::engine::Engine;
 use crate::meter::{Meter, Profile, Status};
 use crate::sessions::{Summary, View};
 use crate::settings::Settings;
@@ -50,7 +49,6 @@ static DUNGEON: AtomicBool = AtomicBool::new(false);
 static EXITING: AtomicBool = AtomicBool::new(false);
 static OPENING: Mutex<()> = Mutex::new(());
 static PROFILE: Mutex<Option<Profile>> = Mutex::new(None);
-static DIAGNOSTICS: Mutex<BTreeMap<String, Diagnostic>> = Mutex::new(BTreeMap::new());
 
 #[derive(Serialize, Clone)]
 struct OverlayState {
@@ -64,11 +62,6 @@ enum UpdateState {
 	Checking,
 	Downloading { version: String, progress: Option<u64> },
 	Installing { version: String },
-}
-
-#[command]
-fn diagnostics() -> BTreeMap<String, Diagnostic> {
-	DIAGNOSTICS.lock().map(|current| current.clone()).unwrap_or_default()
 }
 
 #[command]
@@ -169,7 +162,7 @@ pub fn run() {
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![reset, profile, diagnostics, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, lock_session, delete_session])
+		.invoke_handler(generate_handler![reset, profile, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, lock_session, delete_session])
 		.on_window_event(|window, event| {
 			if !matches!(event, WindowEvent::Destroyed) {
 				return;
@@ -281,12 +274,6 @@ fn capture(app: AppHandle) {
 			}
 			if RESET.swap(false, Ordering::Relaxed) {
 				engine.reset();
-			}
-			if engine.take_diagnostics_change() {
-				if let Ok(mut current) = DIAGNOSTICS.lock() {
-					current.clone_from(engine.diagnostics());
-				}
-				let _ = app.emit("diagnostics", engine.diagnostics());
 			}
 			if engine.take_profile_change() {
 				let _ = profiles::save(&app, engine.profiles());

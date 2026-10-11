@@ -6,7 +6,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ClassIcon } from "@/components/class-icon";
 import { GearIcon, gradeBorder, gradeText } from "@/components/gear-icon";
 import { SkillIcon } from "@/components/skill-icon";
-import { SyncStatus } from "@/components/sync-status";
 import { daevanionBoard, daevanionNodes, daevanionTotals, detailName, godstoneName, itemDetail, itemGrade, itemName, itemOrder, itemSet, localized, localizedValue, nodeEffects, skillKnown, skillName, speciesName, statId, statName, statValue, stoneValue } from "@/lib/game-data";
 import { language, useDictionary } from "@/lib/i18n";
 import type { Board, Gear, Profile, SkillLevel, Species } from "@/lib/meter";
@@ -341,10 +340,7 @@ export function Character() {
 				)}
 			</header>
 			{sorted.length === 0 ? (
-				<div className="m-auto flex flex-col items-center gap-4 p-4">
-					<p className="max-w-sm text-center text-sm text-muted-foreground">{t.character.empty}</p>
-					<SyncStatus />
-				</div>
+				<p className="m-auto max-w-sm p-4 text-center text-sm text-muted-foreground">{t.character.empty}</p>
 			) : (
 				<Tabs defaultValue="equipment" className="flex min-h-0 flex-1 flex-col gap-0">
 					<TabsList className="mx-3 mt-2 w-auto shrink-0 self-start">
