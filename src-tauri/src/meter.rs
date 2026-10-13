@@ -338,8 +338,12 @@ impl Meter {
 			Event::Daevanion { boards } => self.pending.daevanion = Some(boards),
 			Event::OwnEquipment { equipment } => self.pending.equipment = Some(equipment),
 			Event::Perception { species, pets } => {
-				self.pending.perception = Some(species);
-				self.pending.pets = Some(pets);
+				if !species.is_empty() {
+					self.pending.perception = Some(species);
+				}
+				if !pets.is_empty() {
+					self.pending.pets = Some(pets);
+				}
 			}
 			Event::PetGain { pet, amount } => self.gain_pet(pet, amount),
 			Event::Spawn { entity, owner, vitals } => self.spawn(entity, owner, vitals),

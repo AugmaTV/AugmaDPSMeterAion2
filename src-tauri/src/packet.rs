@@ -443,7 +443,8 @@ fn perception(data: &[u8]) -> Option<Event> {
 	}
 	let ends = headers.iter().skip(1).copied().chain([data.len()]);
 	let species: Vec<Species> = headers.iter().zip(ends).map(|(start, end)| species_block(&data[*start..end])).collect();
-	(!species.is_empty()).then_some(Event::Perception { species, pets: pets(data) })
+	let pets = pets(data);
+	(!species.is_empty() || !pets.is_empty()).then_some(Event::Perception { species, pets })
 }
 
 fn pets(data: &[u8]) -> Vec<Pet> {
