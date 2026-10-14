@@ -3,7 +3,7 @@ use std::ops::{Range, RangeInclusive};
 
 use serde::{Deserialize, Serialize};
 
-use crate::reader::Reader;
+use crate::reader::{varint, Reader};
 
 const RECORD: [u8; 2] = [0x04, 0x38];
 const PERIODIC: [u8; 2] = [0x05, 0x38];
@@ -25,6 +25,7 @@ const DAEVANION: [u8; 2] = [0x26, 0xE2];
 const OWN_EQUIPMENT: [u8; 2] = [0x11, 0x56];
 const PETS: [u8; 2] = [0x00, 0x90];
 const PET_GAIN: [u8; 2] = [0x0D, 0x90];
+const PET_COUNT: usize = 4;
 const PET_ENTRY: usize = 12;
 const PET_PROGRESS: usize = 8;
 const PET_LEVELS: RangeInclusive<u32> = 0..=10;
@@ -448,17 +449,19 @@ fn perception(data: &[u8]) -> Option<Event> {
 }
 
 fn pets(data: &[u8]) -> Vec<Pet> {
-	let Some(count) = data.get(4).copied().map(usize::from) else {
+	let Some((count, width)) = data.get(PET_COUNT..).and_then(varint) else {
 		return Vec::new();
 	};
-	let list = data.get(5..5 + count * PET_ENTRY).unwrap_or_default();
-	let rest = data.get(5 + count * PET_ENTRY..).unwrap_or_default();
-	let progress: Vec<(u32, u32)> = match rest.split_first() {
-		Some((length, entries)) => entries
+	let start = PET_COUNT + width;
+	let end = start + count as usize * PET_ENTRY;
+	let list = data.get(start..end).unwrap_or_default();
+	let rest = data.get(end..).unwrap_or_default();
+	let progress: Vec<(u32, u32)> = match varint(rest) {
+		Some((length, width)) => rest[width..]
 			.as_chunks::<PET_PROGRESS>()
 			.0
 			.iter()
-			.take(usize::from(*length))
+			.take(length as usize)
 			.map(|entry| (u32::from_le_bytes([entry[0], entry[1], entry[2], entry[3]]), u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]])))
 			.collect(),
 		None => Vec::new(),
