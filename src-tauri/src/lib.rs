@@ -26,7 +26,7 @@ use tauri_plugin_window_state::StateFlags;
 
 use crate::capture::Source;
 use crate::engine::Engine;
-use crate::meter::{Meter, Profile, Status};
+use crate::meter::{Meter, Profile, Profiles, Status};
 use crate::sessions::{Summary, View};
 use crate::settings::Settings;
 
@@ -49,6 +49,7 @@ static DUNGEON: AtomicBool = AtomicBool::new(false);
 static EXITING: AtomicBool = AtomicBool::new(false);
 static OPENING: Mutex<()> = Mutex::new(());
 static PROFILE: Mutex<Option<Profile>> = Mutex::new(None);
+static CHARACTERS: Mutex<Vec<Profile>> = Mutex::new(Vec::new());
 
 #[derive(Serialize, Clone)]
 struct OverlayState {
@@ -67,6 +68,11 @@ enum UpdateState {
 #[command]
 fn profile(app: AppHandle) -> Option<Profile> {
 	PROFILE.lock().ok().and_then(|profile| profile.clone()).or_else(|| profiles::last(&app))
+}
+
+#[command]
+fn characters(app: AppHandle) -> Vec<Profile> {
+	CHARACTERS.lock().ok().filter(|characters| !characters.is_empty()).map(|characters| characters.clone()).unwrap_or_else(|| listing(&profiles::load(&app)))
 }
 
 #[command]
@@ -162,7 +168,7 @@ pub fn run() {
 				})
 				.build(),
 		)
-		.invoke_handler(generate_handler![reset, profile, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, lock_session, delete_session])
+		.invoke_handler(generate_handler![reset, profile, characters, overlay, open_overlay, lock_overlay, party_only, set_party_only, dungeon, set_dungeon, list_sessions, load_session, rename_session, lock_session, delete_session])
 		.on_window_event(|window, event| {
 			if !matches!(event, WindowEvent::Destroyed) {
 				return;
@@ -196,6 +202,12 @@ pub fn run() {
 				pktmon::stop();
 			}
 		});
+}
+
+fn listing(profiles: &Profiles) -> Vec<Profile> {
+	let mut characters: Vec<Profile> = profiles.characters.values().cloned().collect();
+	characters.sort_by(|a, b| a.name.cmp(&b.name));
+	characters
 }
 
 fn set_locked(app: &AppHandle, locked: bool) {
@@ -280,6 +292,9 @@ fn capture(app: AppHandle) {
 				let profile = engine.profile();
 				if let Ok(mut current) = PROFILE.lock() {
 					current.clone_from(&profile);
+				}
+				if let Ok(mut characters) = CHARACTERS.lock() {
+					*characters = listing(engine.profiles());
 				}
 				let _ = app.emit("profile", profile);
 			}

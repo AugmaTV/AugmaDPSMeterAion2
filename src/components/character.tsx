@@ -1,14 +1,13 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import type { ReactNode } from "react";
 import { Gem } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ClassIcon } from "@/components/class-icon";
+import { CharacterPicker } from "@/components/character-picker";
 import { GearIcon, gradeBorder, gradeText } from "@/components/gear-icon";
 import { SkillIcon } from "@/components/skill-icon";
 import { daevanionBoard, daevanionNodes, daevanionTotals, detailName, godstoneName, itemDetail, itemGrade, itemName, itemOrder, itemSet, localized, localizedValue, nodeEffects, skillKnown, skillName, speciesName, statId, statName, statValue, stoneValue } from "@/lib/game-data";
+import { useCharacters } from "@/lib/characters";
 import { language, useDictionary } from "@/lib/i18n";
-import type { Board, Gear, Profile, SkillLevel, Species } from "@/lib/meter";
+import type { Board, Gear, SkillLevel, Species } from "@/lib/meter";
 import { cn } from "@/lib/utils";
 
 function Line({ title, children }: { title: string; children: ReactNode }) {
@@ -316,15 +315,7 @@ function Skills({ levels, gameClass }: { levels: SkillLevel[]; gameClass: number
 
 export function Character() {
 	const t = useDictionary();
-	const [profile, setProfile] = useState<Profile | null>(null);
-
-	useEffect(() => {
-		const listener = listen<Profile | null>("profile", (event) => setProfile(event.payload));
-		invoke<Profile | null>("profile").then(setProfile);
-		return () => {
-			listener.then((unlisten) => unlisten());
-		};
-	}, []);
+	const { selected: profile } = useCharacters();
 
 	const sorted = [...(profile?.equipment ?? [])].sort((a, b) => itemOrder(a.id) - itemOrder(b.id));
 
@@ -332,12 +323,7 @@ export function Character() {
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b px-3 text-sm">
 				<span className="font-semibold">{t.character.title}</span>
-				{profile && (
-					<span className="ml-auto flex min-w-0 items-center gap-1.5 text-muted-foreground">
-						<ClassIcon gameClass={profile.class} className="size-4" />
-						<span className="truncate">{profile.name}</span>
-					</span>
-				)}
+				<CharacterPicker />
 			</header>
 			{sorted.length === 0 ? (
 				<p className="m-auto max-w-sm p-4 text-center text-sm text-muted-foreground">{t.character.empty}</p>

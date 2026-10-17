@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { PictureInPicture2, Pin } from "lucide-react";
+import { CharacterPicker } from "@/components/character-picker";
 import { Perception } from "@/components/character";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PetIcon } from "@/components/pet-icon";
 import { knownPets, PET_MAX_LEVEL, PET_THRESHOLDS, petGenus, petName, speciesName } from "@/lib/game-data";
+import { useCharacters } from "@/lib/characters";
 import { useDictionary } from "@/lib/i18n";
-import type { Pet, Profile } from "@/lib/meter";
+import type { Pet } from "@/lib/meter";
 import { toggleTrackedPet, useTrackedPets } from "@/lib/tracking";
 import { cn } from "@/lib/utils";
 
@@ -48,15 +48,7 @@ function Card({ pet, tracked, last }: { pet: Pet; tracked: boolean; last: boolea
 export function Pets() {
 	const t = useDictionary();
 	const tracked = useTrackedPets();
-	const [profile, setProfile] = useState<Profile | null>(null);
-
-	useEffect(() => {
-		const listener = listen<Profile | null>("profile", (event) => setProfile(event.payload));
-		invoke<Profile | null>("profile").then(setProfile);
-		return () => {
-			listener.then((unlisten) => unlisten());
-		};
-	}, []);
+	const { selected: profile } = useCharacters();
 
 	const received = new Set((profile?.pets ?? []).map((pet) => pet.id));
 	const missing = knownPets().filter((id) => !received.has(id)).map((id): Pet => ({ id, level: 0, progress: 0 }));
@@ -72,7 +64,8 @@ export function Pets() {
 				<span className="text-muted-foreground tabular-nums">
 					{owned}/{pets.length}
 				</span>
-				<Button variant="ghost" size="icon-sm" className="ml-auto" title={t.character.petOverlay} onClick={() => invoke("open_overlay", { mode: "pets" })}>
+				<CharacterPicker />
+				<Button variant="ghost" size="icon-sm" title={t.character.petOverlay} onClick={() => invoke("open_overlay", { mode: "pets" })}>
 					<PictureInPicture2 />
 				</Button>
 			</header>

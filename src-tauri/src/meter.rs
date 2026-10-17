@@ -334,9 +334,18 @@ impl Meter {
 				self.owners.remove(&entity);
 				self.names.insert(entity, name);
 			}
-			Event::SkillLevels { levels } => self.pending.skill_levels = Some(levels),
-			Event::Daevanion { boards } => self.pending.daevanion = Some(boards),
-			Event::OwnEquipment { equipment } => self.pending.equipment = Some(equipment),
+			Event::SkillLevels { levels } => {
+				self.pending.skill_levels = Some(levels);
+				self.flush_profile();
+			}
+			Event::Daevanion { boards } => {
+				self.pending.daevanion = Some(boards);
+				self.flush_profile();
+			}
+			Event::OwnEquipment { equipment } => {
+				self.pending.equipment = Some(equipment);
+				self.flush_profile();
+			}
 			Event::Perception { species, pets } => {
 				if !species.is_empty() {
 					self.pending.perception = Some(species);
@@ -344,6 +353,7 @@ impl Meter {
 				if !pets.is_empty() {
 					self.pending.pets = Some(pets);
 				}
+				self.flush_profile();
 			}
 			Event::PetGain { pet, amount } => self.gain_pet(pet, amount),
 			Event::Spawn { entity, owner, vitals } => self.spawn(entity, owner, vitals),
@@ -634,6 +644,13 @@ impl Meter {
 		}
 		profile.last_pet = Some(pet);
 		self.profile_changed = true;
+	}
+
+	fn flush_profile(&mut self) {
+		let Some((own, name)) = self.own.and_then(|own| self.names.get(&own).map(|name| (own, name.clone()))) else {
+			return;
+		};
+		self.update_profile(own, &name, &[]);
 	}
 
 	fn update_profile(&mut self, entity: u64, name: &str, visible: &[Gear]) {
@@ -1307,6 +1324,19 @@ mod tests {
 		assert_eq!(profile.class, 3);
 		assert_eq!(profile.equipment.iter().map(|gear| (gear.slot, gear.id, gear.enchant)).collect::<Vec<_>>(), [(1, 110330049, 16), (3, 210340031, 3), (13, 310330051, 10)]);
 		assert_eq!(profile.equipment[0].godstone, Some(19950007));
+	}
+
+	#[test]
+	fn keeps_each_character_profile_when_switching() {
+		let mut meter = Meter::default();
+		meter.apply(0, Event::Character { entity: 1, name: String::from("Alpha"), own: true, equipment: Vec::new() });
+		meter.apply(0, Event::OwnEquipment { equipment: vec![Gear { slot: 1, id: 110330049, enchant: 16, ..Gear::default() }] });
+		meter.reconnect(0);
+		meter.apply(0, Event::Character { entity: 2, name: String::from("Beta"), own: true, equipment: Vec::new() });
+		meter.apply(0, Event::OwnEquipment { equipment: vec![Gear { slot: 2, id: 210340031, enchant: 3, ..Gear::default() }] });
+		let profile = meter.profile().unwrap();
+		assert_eq!((profile.name.as_str(), profile.equipment.len(), profile.equipment[0].id), ("Beta", 1, 210340031));
+		assert_eq!(meter.profiles().characters["Alpha"].equipment[0].id, 110330049);
 	}
 
 	#[test]
